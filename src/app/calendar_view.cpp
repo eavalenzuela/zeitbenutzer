@@ -220,7 +220,7 @@ void CalGrid::drawBackground(QPainter* p, const QRectF&)
 
     const QColor doneGreen(0x2e, 0x7d, 0x32);
 
-    const auto drawBlock = [&](const QRectF& r, const QColor& brush,
+    const auto drawBlock = [&](const QRectF& r, const QBrush& brush,
                                const QPen& pen, const QString& label) {
         p->setBrush(brush);
         p->setPen(pen);
@@ -248,12 +248,24 @@ void CalGrid::drawBackground(QPainter* p, const QRectF&)
                 if (o.seriesId)
                     label += QStringLiteral("  ↻");
 
+                const bool orphan = !o.projectId.has_value();
+
                 if (o.status == BlockStatus::Skipped) {
                     QPen pen(th.subtleText, 1.2);
                     pen.setStyle(Qt::DashLine);
                     drawBlock(r, QColor(th.subtleText.red(), th.subtleText.green(),
                                         th.subtleText.blue(), 30),
                               pen, label + QStringLiteral("  (skipped)"));
+                } else if (orphan) {
+                    // No project: hatched neutral grey + a ⚠ marker so unfiled
+                    // blocks are visually obvious (they vanish from rollups).
+                    QBrush hatch(QColor(th.subtleText.red(), th.subtleText.green(),
+                                        th.subtleText.blue(), o.materialized ? 55 : 30),
+                                 Qt::FDiagPattern);
+                    QPen pen(th.subtleText, 1.2);
+                    if (!o.materialized)
+                        pen.setStyle(Qt::DashLine);
+                    drawBlock(r, hatch, pen, QStringLiteral("⚠ ") + label);
                 } else if (o.materialized) {
                     drawBlock(r, QColor(base.red(), base.green(), base.blue(), 60),
                               QPen(base, 1.5), label);
@@ -293,6 +305,20 @@ void CalGrid::drawBackground(QPainter* p, const QRectF&)
                             .arg(m_dragStart.time().minute(), 2, 10, QLatin1Char('0'))
                             .arg(mins));
         }
+    }
+
+    // Current-time line across today's column.
+    for (int d = 0; d < 7; ++d) {
+        if (m_weekStart.addDays(d) != today)
+            continue;
+        const double y =
+            yForMinutes(QTime::currentTime().msecsSinceStartOfDay() / 60000.0);
+        const QColor red(0xe5, 0x39, 0x35);
+        p->setPen(QPen(red, 1.5));
+        p->drawLine(QPointF(xForDay(d), y), QPointF(xForDay(d) + dayWidth(), y));
+        p->setBrush(red);
+        p->setPen(Qt::NoPen);
+        p->drawEllipse(QPointF(xForDay(d), y), 3, 3);
     }
 }
 
@@ -435,6 +461,7 @@ void CalGrid::mouseReleaseEvent(QMouseEvent* e)
                                   rule.byDay = {1, 2, 3, 4, 5}; break;
                 case R::Monthly:  rule.freq = RRule::Freq::Monthly; break;
                 }
+                rule.count = dlg.count(); // 0 = unbounded
 
                 if (!recurring) {
                     Block b;

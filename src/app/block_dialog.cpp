@@ -4,6 +4,7 @@
 
 #include <QComboBox>
 #include <QDialogButtonBox>
+#include <QSpinBox>
 #include <QFormLayout>
 #include <QHash>
 #include <QLineEdit>
@@ -60,10 +61,20 @@ BlockDialog::BlockDialog(Store& store, QWidget* parent)
                         QStringLiteral("Weekly"),
                         QStringLiteral("Monthly")});
 
+    m_count = new QSpinBox(this);
+    m_count->setRange(0, 999);
+    m_count->setSpecialValueText(QStringLiteral("∞ (forever)"));
+    m_count->setSuffix(QStringLiteral(" times"));
+    m_count->setEnabled(false); // only meaningful once a repeat is chosen
+
+    connect(m_repeat, &QComboBox::currentIndexChanged, this,
+            [this](int i) { m_count->setEnabled(i != 0); });
+
     auto* form = new QFormLayout(this);
     form->addRow(QStringLiteral("Title"), m_title);
     form->addRow(QStringLiteral("Project"), m_project);
     form->addRow(QStringLiteral("Repeat"), m_repeat);
+    form->addRow(QStringLiteral("Repeat for"), m_count);
 
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
@@ -95,5 +106,7 @@ BlockDialog::Repeat BlockDialog::repeat() const
 {
     return static_cast<Repeat>(m_repeat->currentIndex());
 }
+
+int BlockDialog::count() const { return m_count->value(); }
 
 } // namespace zb

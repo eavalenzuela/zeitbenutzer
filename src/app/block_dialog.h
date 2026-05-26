@@ -12,8 +12,7 @@
 
 class QComboBox;
 class QLineEdit;
-
-class QComboBox;
+class QSpinBox;
 
 namespace zb {
 
@@ -35,11 +34,13 @@ public:
     QString           title() const;
     std::optional<Id> projectId() const;
     Repeat            repeat() const;
+    int               count() const; // 0 == forever; ignored when repeat==None
 
 private:
     QLineEdit* m_title;
     QComboBox* m_project;   // each item's data = project id (-1 == none)
     QComboBox* m_repeat;    // index maps to Repeat
+    QSpinBox*  m_count;     // occurrence limit (0 = ∞)
 };
 
 } // namespace zb

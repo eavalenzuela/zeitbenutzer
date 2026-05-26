@@ -41,7 +41,11 @@ rendering across every widget and platform.
 
 **Project colors:** each project has a color (right-click → Set colour…, or a
 stable auto-color derived from its id). Shown as a swatch in the tree and used
-to tint calendar blocks by project.
+to tint calendar blocks by project. Blocks with **no project** render hatched
+grey with a ⚠ marker so they stand out (they don't appear in rollups).
+
+Calendar niceties: a red **current-time line** on today's column, and a
+**"Repeat for N times"** option (RRULE `COUNT`) in the create dialog.
 
 ## Stack
 
