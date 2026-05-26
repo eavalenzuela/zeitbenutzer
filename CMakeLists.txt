@@ -41,6 +41,8 @@ add_library(zb-app STATIC
     src/app/note_editor.cpp
     src/app/typography.cpp
     src/app/theme.cpp
+    src/app/settings.cpp
+    src/app/settings_dialog.cpp
 )
 target_link_libraries(zb-app PUBLIC zb-storage Qt6::Widgets)
 

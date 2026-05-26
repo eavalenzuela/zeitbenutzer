@@ -60,7 +60,7 @@ private:
     double yForMinutes(double m) const;
     int    dayAt(double x) const;       // 0..6, or -1 in the gutter
     double minutesAt(double y) const;   // 0..1440 (unsnapped)
-    static double snap15(double minutes);
+    double snap(double minutes) const;  // to the configured snap interval
     QRectF rectForSpan(const QDateTime& s, const QDateTime& e, Lane lane) const;
     // Topmost occurrence under pos. Fills edge (-1 top,0 body,1 bottom) and the
     // lane hit. Returns -1 on miss.
@@ -92,6 +92,8 @@ public:
 
     void reload();
     int  occurrenceCount() const; // for tests
+    // Re-align the viewed week to the (possibly changed) week-start setting.
+    void applySettings();
 
 public slots:
     void setActiveProject(zb::Id p);

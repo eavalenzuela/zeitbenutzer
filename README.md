@@ -34,6 +34,9 @@ organizes them temporally. See [`DESIGN.md`](./DESIGN.md) for the full design.
 
 The core build plan (modules 0–5) is complete.
 
+**Settings** (App → Settings…): week-start day (Mon/Sun) and calendar snap
+interval (15/30 min), persisted to `settings.ini` in the app-data dir.
+
 ## Stack
 
 - **Qt6 / C++20** (Core, Sql, Widgets), CMake. Target: **macOS + Linux**.

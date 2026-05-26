@@ -4,9 +4,12 @@
 #include "app/note_editor.h"
 #include "app/note_list_panel.h"
 #include "app/project_tree_panel.h"
+#include "app/settings_dialog.h"
 #include "app/task_list_panel.h"
 #include "app/time_rollup_panel.h"
 
+#include <QMenu>
+#include <QMenuBar>
 #include <QSplitter>
 #include <QTabWidget>
 
@@ -49,6 +52,18 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
     split->setStretchFactor(1, 1);
     split->setSizes({240, 900});
     setCentralWidget(split);
+
+    // Menu bar: Settings + Quit.
+    QMenu* appMenu = menuBar()->addMenu(QStringLiteral("&App"));
+    appMenu->addAction(QStringLiteral("Settings…"), this, [this] {
+        SettingsDialog dlg(this);
+        if (dlg.exec() == QDialog::Accepted) {
+            m_calendar->applySettings();
+            m_time->recompute();
+        }
+    });
+    appMenu->addSeparator();
+    appMenu->addAction(QStringLiteral("Quit"), this, &QMainWindow::close);
 
     // tree -> {notes, tasks, calendar's default project}; notes -> editor
     connect(m_tree, &ProjectTreePanel::projectSelected, m_notes,

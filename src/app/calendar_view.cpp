@@ -2,6 +2,7 @@
 
 #include "app/block_dialog.h"
 #include "app/block_edit_dialog.h"
+#include "app/settings.h"
 #include "app/theme.h"
 #include "storage/recurrence.h"
 #include "storage/store.h"
@@ -20,10 +21,6 @@
 namespace zb {
 
 namespace {
-QDate mondayOf(const QDate& d)
-{
-    return d.addDays(-(d.dayOfWeek() - 1)); // dayOfWeek: Mon=1..Sun=7
-}
 double clampd(double v, double lo, double hi)
 {
     return std::max(lo, std::min(hi, v));
@@ -43,7 +40,7 @@ CalGrid::CalGrid(Store& store, QWidget* parent)
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setAlignment(Qt::AlignTop | Qt::AlignLeft);
     setMouseTracking(true);
-    m_weekStart = mondayOf(QDate::currentDate());
+    m_weekStart = weekStartFor(QDate::currentDate());
 }
 
 void CalGrid::setWeekStart(const QDate& monday)
@@ -80,7 +77,7 @@ double CalGrid::minutesAt(double y) const
 {
     return clampd((y - kHeader) / ppm(), 0, 1440);
 }
-double CalGrid::snap15(double minutes) { return std::round(minutes / 15.0) * 15.0; }
+double CalGrid::snap(double minutes) const { const double n = Settings::instance().snapMinutes(); return std::round(minutes / n) * n; }
 
 QDateTime CalGrid::dayTime(const QDate& day, double minutes) const
 {
@@ -336,7 +333,7 @@ void CalGrid::mousePressEvent(QMouseEvent* e)
             m_mode = Mode::Create;
             m_activeIdx = -1;
             m_dragDay = m_weekStart.addDays(day);
-            m_createAnchorMin = snap15(minutesAt(pos.y()));
+            m_createAnchorMin = snap(minutesAt(pos.y()));
             m_dragStart = dayTime(m_dragDay, m_createAnchorMin);
             m_dragEnd = m_dragStart.addSecs(15 * 60);
             m_dragging = true;
@@ -366,8 +363,8 @@ void CalGrid::mouseMoveEvent(QMouseEvent* e)
     const double cur = minutesAt(pos.y());
     switch (m_mode) {
     case Mode::Create: {
-        double s = std::min(m_createAnchorMin, snap15(cur));
-        double en = std::max(m_createAnchorMin, snap15(cur));
+        double s = std::min(m_createAnchorMin, snap(cur));
+        double en = std::max(m_createAnchorMin, snap(cur));
         if (en - s < 15)
             en = s + 15;
         m_dragStart = dayTime(m_dragDay, s);
@@ -376,7 +373,7 @@ void CalGrid::mouseMoveEvent(QMouseEvent* e)
     }
     case Mode::Move: {
         const double dur = m_dragStart.secsTo(m_dragEnd) / 60.0;
-        double s = snap15(cur - m_grabOffsetMin);
+        double s = snap(cur - m_grabOffsetMin);
         s = clampd(s, 0, 1440 - dur);
         const int newDay = dayAt(pos.x());
         m_dragDay = m_weekStart.addDays(newDay);
@@ -386,13 +383,13 @@ void CalGrid::mouseMoveEvent(QMouseEvent* e)
     }
     case Mode::ResizeTop: {
         const double endMin = m_dragEnd.time().msecsSinceStartOfDay() / 60000.0;
-        double s = clampd(snap15(cur), 0, endMin - 15);
+        double s = clampd(snap(cur), 0, endMin - 15);
         m_dragStart = dayTime(m_dragDay, s);
         break;
     }
     case Mode::ResizeBottom: {
         const double startMin = m_dragStart.time().msecsSinceStartOfDay() / 60000.0;
-        double en = clampd(snap15(cur), startMin + 15, 1440);
+        double en = clampd(snap(cur), startMin + 15, 1440);
         m_dragEnd = dayTime(m_dragDay, en);
         break;
     }
@@ -579,6 +576,12 @@ void CalendarView::reload()
 
 int CalendarView::occurrenceCount() const { return m_grid->occurrenceCount(); }
 
+void CalendarView::applySettings()
+{
+    m_grid->setWeekStart(weekStartFor(m_grid->weekStart()));
+    updateLabel();
+}
+
 void CalendarView::setActiveProject(Id p) { m_grid->setActiveProject(p); }
 
 void CalendarView::updateLabel()
@@ -592,7 +595,7 @@ void CalendarView::updateLabel()
 
 void CalendarView::goToday()
 {
-    m_grid->setWeekStart(mondayOf(QDate::currentDate()));
+    m_grid->setWeekStart(weekStartFor(QDate::currentDate()));
     updateLabel();
 }
 void CalendarView::goPrev()

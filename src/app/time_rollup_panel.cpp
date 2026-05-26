@@ -1,5 +1,6 @@
 #include "app/time_rollup_panel.h"
 
+#include "app/settings.h"
 #include "storage/store.h"
 
 #include <QCheckBox>
@@ -10,8 +11,6 @@
 namespace zb {
 
 namespace {
-QDate mondayOf(const QDate& d) { return d.addDays(-(d.dayOfWeek() - 1)); }
-
 QString fmtMinutes(qint64 m)
 {
     if (m <= 0)
@@ -100,7 +99,7 @@ void TimeRollupPanel::recompute()
     m_title->setText(name);
 
     const bool sub = m_inclSub->isChecked();
-    const QDate mon = mondayOf(QDate::currentDate());
+    const QDate mon = weekStartFor(QDate::currentDate());
     const QDateTime ws(mon, QTime(0, 0));
     const QDateTime we(mon.addDays(6), QTime(23, 59, 59));
 
