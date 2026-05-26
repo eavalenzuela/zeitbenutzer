@@ -1,0 +1,11 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <qresource prefix="/">
+    <file>fonts/SourceCodePro-Regular.ttf</file>
+    <file>fonts/SourceCodePro-Bold.ttf</file>
+    <file>fonts/SourceSans3-Regular.ttf</file>
+    <file>fonts/SourceSans3-Bold.ttf</file>
+    <file>fonts/SourceSans3-It.ttf</file>
+    <file>fonts/SourceSans3-BoldIt.ttf</file>
+  </qresource>
+</RCC>
