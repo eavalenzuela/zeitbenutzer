@@ -19,6 +19,9 @@ public:
     int  snapMinutes() const;           // calendar drag snap (15 or 30)
     void setSnapMinutes(int minutes);
 
+    QString themeName() const;          // "light" | "dark"
+    void    setThemeName(const QString& name);
+
     QString dataLocation() const;       // dir holding the DB + this ini
 
 private:

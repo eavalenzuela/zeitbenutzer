@@ -102,4 +102,11 @@ void NoteEditor::flush()
     }
 }
 
+void NoteEditor::refreshTheme()
+{
+    stylePreview(m_preview, currentTheme());
+    if (m_noteId > 0)
+        m_preview->setMarkdown(m_body->toPlainText()); // re-render with new CSS
+}
+
 } // namespace zb

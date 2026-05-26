@@ -8,9 +8,11 @@
 // CalGrid is the painted grid + interaction; CalendarView wraps it with a
 // navigation toolbar (prev / today / next + week label).
 
+#include <QColor>
 #include <QDate>
 #include <QDateTime>
 #include <QGraphicsView>
+#include <QHash>
 #include <QWidget>
 
 #include "storage/types.h"
@@ -72,6 +74,7 @@ private:
     QDate             m_weekStart;      // Monday
     Id                m_activeProject = -1;
     QList<Occurrence> m_occ;
+    QHash<Id, QColor> m_projectColors;  // rebuilt on reload; drives block color
 
     // --- interaction ---------------------------------------------------------
     enum class Mode { None, Create, Move, ResizeTop, ResizeBottom };

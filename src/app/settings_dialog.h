@@ -16,6 +16,7 @@ public:
 private:
     void save();
 
+    QComboBox* m_theme;
     QComboBox* m_weekStart;
     QComboBox* m_snap;
 };

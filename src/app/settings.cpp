@@ -40,6 +40,15 @@ void Settings::setSnapMinutes(int minutes)
     m_s.setValue(QStringLiteral("calendar/snapMinutes"), minutes > 0 ? minutes : 15);
 }
 
+QString Settings::themeName() const
+{
+    return m_s.value(QStringLiteral("ui/theme"), QStringLiteral("light")).toString();
+}
+void Settings::setThemeName(const QString& name)
+{
+    m_s.setValue(QStringLiteral("ui/theme"), name);
+}
+
 QString Settings::dataLocation() const
 {
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);

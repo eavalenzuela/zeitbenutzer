@@ -26,11 +26,14 @@ public:
 
 signals:
     void projectSelected(zb::Id projectId); // -1 == none
+    void projectsChanged();                  // structure/color changed → refresh
 
 private slots:
     void onNewTopProject();
     void onNewChildProject();
     void onDeleteProject();
+    void onSetColor();
+    void onContextMenu(const QPoint& pos);
     void onItemChanged(QStandardItem* item);
     void onCurrentChanged();
 

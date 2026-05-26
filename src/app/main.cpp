@@ -1,4 +1,5 @@
 #include "app/main_window.h"
+#include "app/settings.h"
 #include "app/theme.h"
 #include "app/typography.h"
 #include "storage/database.h"
@@ -16,7 +17,7 @@ int main(int argc, char** argv)
 
     zb::registerBundledFonts();
     QApplication::setFont(zb::uiFont()); // chrome + preview; editor overrides to mono
-    zb::applyTheme(app, zb::lightTheme());
+    zb::applyTheme(app, zb::themeByName(zb::Settings::instance().themeName()));
 
     const QString dir =
         QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);

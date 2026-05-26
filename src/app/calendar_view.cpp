@@ -54,6 +54,11 @@ void CalGrid::reload()
     const QDateTime start(m_weekStart, QTime(0, 0));
     const QDateTime end(m_weekStart.addDays(6), QTime(23, 59, 59));
     m_occ = m_store.occurrencesInRange(start, end);
+
+    m_projectColors.clear();
+    for (const Project& p : m_store.listProjects(true))
+        m_projectColors.insert(p.id, projectColor(p.color, p.id));
+
     viewport()->update();
 }
 
@@ -232,9 +237,13 @@ void CalGrid::drawBackground(QPainter* p, const QRectF&)
         if (!(m_dragging && m_activeIdx == i)) { // active one drawn live below
             const QRectF r = rectForSpan(o.plannedStart, o.plannedEnd, Lane::Planned);
             if (!r.isNull()) {
-                QColor base = o.color.isEmpty() ? th.accent : QColor(o.color);
-                if (!base.isValid())
-                    base = th.accent;
+                // Block color follows its project; fall back to any block color,
+                // else the theme accent.
+                QColor base = th.accent;
+                if (o.projectId && m_projectColors.contains(*o.projectId))
+                    base = m_projectColors.value(*o.projectId);
+                else if (!o.color.isEmpty() && QColor(o.color).isValid())
+                    base = QColor(o.color);
                 QString label = o.title.isEmpty() ? QStringLiteral("(block)") : o.title;
                 if (o.seriesId)
                     label += QStringLiteral("  ↻");

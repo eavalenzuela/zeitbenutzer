@@ -34,8 +34,14 @@ organizes them temporally. See [`DESIGN.md`](./DESIGN.md) for the full design.
 
 The core build plan (modules 0–5) is complete.
 
-**Settings** (App → Settings…): week-start day (Mon/Sun) and calendar snap
-interval (15/30 min), persisted to `settings.ini` in the app-data dir.
+**Settings** (App → Settings…): light/dark **theme**, week-start day (Mon/Sun),
+and calendar snap interval (15/30 min), persisted to `settings.ini` in the
+app-data dir. Theming uses Qt's Fusion style + a palette for consistent
+rendering across every widget and platform.
+
+**Project colors:** each project has a color (right-click → Set colour…, or a
+stable auto-color derived from its id). Shown as a swatch in the tree and used
+to tint calendar blocks by project.
 
 ## Stack
 

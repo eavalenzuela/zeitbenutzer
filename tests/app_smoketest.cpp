@@ -11,6 +11,7 @@
 #include "app/note_list_panel.h"
 #include "app/project_tree_panel.h"
 #include "app/task_list_panel.h"
+#include "app/theme.h"
 #include "app/time_rollup_panel.h"
 #include "app/typography.h"
 #include "storage/database.h"
@@ -123,6 +124,16 @@ int main(int argc, char** argv)
     app.processEvents();
     check("time rollup reports this-week planned minutes",
           w.timePanel()->weekPlanned() >= 60);
+
+    // Themes + project colors.
+    applyTheme(app, darkTheme());
+    check("dark theme applies", currentTheme().name == QStringLiteral("dark"));
+    applyTheme(app, lightTheme());
+    check("theme by name resolves dark",
+          themeByName(QStringLiteral("dark")).name == QStringLiteral("dark"));
+    check("derived project color is valid", projectColor(QString(), 2).isValid());
+    check("explicit project color honored",
+          projectColor(QStringLiteral("#ff0000"), 2) == QColor(255, 0, 0));
 
     out << "\napp smoke test: " << (failed == 0 ? "all passed" : "FAILURES")
         << "\n";

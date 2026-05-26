@@ -21,6 +21,7 @@ public:
     // The project plus all transitive descendants (for rolled-up queries).
     QList<Id>     projectAndDescendants(Id rootId);
     void          renameProject(Id projectId, const QString& name);
+    void          setProjectColor(Id projectId, const QString& hex);
     // Cascades to descendant projects and their notes/tasks (FK ON DELETE).
     void          deleteProject(Id projectId);
 

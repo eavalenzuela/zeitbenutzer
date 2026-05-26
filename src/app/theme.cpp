@@ -3,8 +3,11 @@
 #include "app/typography.h"
 
 #include <QApplication>
+#include <QPalette>
+#include <QStyleFactory>
 #include <QTextBrowser>
 #include <QTextDocument>
+#include <cmath>
 
 namespace zb {
 
@@ -28,8 +31,41 @@ Theme lightTheme()
     return t;
 }
 
+Theme darkTheme()
+{
+    Theme t;
+    t.name       = QStringLiteral("dark");
+    t.window     = QColor(0x1e, 0x1f, 0x22);
+    t.panel      = QColor(0x2b, 0x2d, 0x30);
+    t.border     = QColor(0x3a, 0x3d, 0x41);
+    t.text       = QColor(0xe6, 0xe6, 0xe6);
+    t.subtleText = QColor(0x9a, 0xa0, 0xa6);
+    t.accent     = QColor(0x4f, 0x8c, 0xff);
+    t.accentText = QColor(0xff, 0xff, 0xff);
+    t.hover      = QColor(0x34, 0x37, 0x3b);
+    t.codeBg     = QColor(0x34, 0x37, 0x3b);
+    return t;
+}
+
+Theme themeByName(const QString& name)
+{
+    return name == QStringLiteral("dark") ? darkTheme() : lightTheme();
+}
+
 const Theme& currentTheme() { return g_current; }
 void setCurrentTheme(const Theme& t) { g_current = t; }
+
+QColor projectColor(const QString& explicitHex, qint64 id)
+{
+    if (!explicitHex.isEmpty()) {
+        const QColor c(explicitHex);
+        if (c.isValid())
+            return c;
+    }
+    // Golden-angle hue spread gives well-separated colors across ids.
+    const double hue = std::fmod(static_cast<double>(id) * 137.508, 360.0);
+    return QColor::fromHsl(static_cast<int>(hue), 150, 145);
+}
 
 QString buildStyleSheet(const Theme& t)
 {
@@ -87,6 +123,31 @@ QSplitter::handle:vertical { height: 6px; }
 void applyTheme(QApplication& app, const Theme& t)
 {
     setCurrentTheme(t);
+
+    // Fusion + a palette gives consistent theming across every widget (combos,
+    // menus, dialogs, scrollbars) and across platforms — native styles ignore
+    // the palette, so dark mode wouldn't take without this.
+    app.setStyle(QStyleFactory::create(QStringLiteral("Fusion")));
+
+    QPalette pal;
+    pal.setColor(QPalette::Window, t.window);
+    pal.setColor(QPalette::Base, t.panel);
+    pal.setColor(QPalette::AlternateBase, t.window);
+    pal.setColor(QPalette::WindowText, t.text);
+    pal.setColor(QPalette::Text, t.text);
+    pal.setColor(QPalette::Button, t.window);
+    pal.setColor(QPalette::ButtonText, t.text);
+    pal.setColor(QPalette::ToolTipBase, t.panel);
+    pal.setColor(QPalette::ToolTipText, t.text);
+    pal.setColor(QPalette::PlaceholderText, t.subtleText);
+    pal.setColor(QPalette::Highlight, t.accent);
+    pal.setColor(QPalette::HighlightedText, t.accentText);
+    pal.setColor(QPalette::Link, t.accent);
+    pal.setColor(QPalette::Disabled, QPalette::Text, t.subtleText);
+    pal.setColor(QPalette::Disabled, QPalette::WindowText, t.subtleText);
+    pal.setColor(QPalette::Disabled, QPalette::ButtonText, t.subtleText);
+    app.setPalette(pal);
+
     app.setStyleSheet(buildStyleSheet(t));
 }
 

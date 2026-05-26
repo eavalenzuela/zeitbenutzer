@@ -4,10 +4,13 @@
 #include "app/note_editor.h"
 #include "app/note_list_panel.h"
 #include "app/project_tree_panel.h"
+#include "app/settings.h"
 #include "app/settings_dialog.h"
 #include "app/task_list_panel.h"
+#include "app/theme.h"
 #include "app/time_rollup_panel.h"
 
+#include <QApplication>
 #include <QMenu>
 #include <QMenuBar>
 #include <QSplitter>
@@ -58,7 +61,9 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
     appMenu->addAction(QStringLiteral("Settings…"), this, [this] {
         SettingsDialog dlg(this);
         if (dlg.exec() == QDialog::Accepted) {
-            m_calendar->applySettings();
+            applyTheme(*qApp, themeByName(Settings::instance().themeName()));
+            m_editor->refreshTheme();
+            m_calendar->applySettings(); // re-aligns week + repaints
             m_time->recompute();
         }
     });
@@ -76,6 +81,11 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
             &TimeRollupPanel::setProject);
     connect(m_notes, &NoteListPanel::noteSelected, m_editor,
             &NoteEditor::loadNote);
+    // Project structure/color changes → repaint the calendar + rollup.
+    connect(m_tree, &ProjectTreePanel::projectsChanged, m_calendar,
+            &CalendarView::reload);
+    connect(m_tree, &ProjectTreePanel::projectsChanged, m_time,
+            &TimeRollupPanel::recompute);
     // editor renames flow back to the list label
     connect(m_editor, &NoteEditor::noteTitleChanged, m_notes,
             &NoteListPanel::updateNoteTitle);

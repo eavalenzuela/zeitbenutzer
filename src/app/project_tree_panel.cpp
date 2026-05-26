@@ -1,17 +1,37 @@
 #include "app/project_tree_panel.h"
 
+#include "app/theme.h"
 #include "storage/store.h"
 
+#include <QColorDialog>
 #include <QHash>
+#include <QIcon>
 #include <QInputDialog>
 #include <QItemSelectionModel>
+#include <QMenu>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPixmap>
 #include <QPushButton>
 #include <QStandardItem>
 #include <QStandardItemModel>
 #include <QToolBar>
 #include <QTreeView>
 #include <QVBoxLayout>
+
+namespace {
+QIcon colorSwatch(const QColor& c)
+{
+    QPixmap pm(12, 12);
+    pm.fill(Qt::transparent);
+    QPainter pt(&pm);
+    pt.setRenderHint(QPainter::Antialiasing, true);
+    pt.setBrush(c);
+    pt.setPen(Qt::NoPen);
+    pt.drawRoundedRect(0, 0, 12, 12, 3, 3);
+    return QIcon(pm);
+}
+} // namespace
 
 namespace zb {
 
@@ -39,8 +59,11 @@ ProjectTreePanel::ProjectTreePanel(Store& store, QWidget* parent)
     m_view->setHeaderHidden(true);
     m_view->setEditTriggers(QAbstractItemView::DoubleClicked
                             | QAbstractItemView::EditKeyPressed);
+    m_view->setContextMenuPolicy(Qt::CustomContextMenu);
     layout->addWidget(m_view);
 
+    connect(m_view, &QTreeView::customContextMenuRequested, this,
+            &ProjectTreePanel::onContextMenu);
     connect(m_model, &QStandardItemModel::itemChanged, this,
             &ProjectTreePanel::onItemChanged);
     connect(m_view->selectionModel(), &QItemSelectionModel::currentChanged, this,
@@ -64,6 +87,7 @@ void ProjectTreePanel::reload()
     for (const Project& p : projects) {
         auto* it = new QStandardItem(p.name);
         it->setData(static_cast<qlonglong>(p.id), kIdRole);
+        it->setIcon(colorSwatch(projectColor(p.color, p.id)));
         it->setEditable(true);
         items.insert(p.id, it);
     }
@@ -119,6 +143,7 @@ void ProjectTreePanel::onNewTopProject()
     const Id id = m_store.createProject(p);
     reload();
     selectProjectById(id);
+    emit projectsChanged();
 }
 
 void ProjectTreePanel::onNewChildProject()
@@ -141,6 +166,7 @@ void ProjectTreePanel::onNewChildProject()
     const Id id = m_store.createProject(p);
     reload();
     selectProjectById(id);
+    emit projectsChanged();
 }
 
 void ProjectTreePanel::onDeleteProject()
@@ -156,6 +182,43 @@ void ProjectTreePanel::onDeleteProject()
     m_store.deleteProject(id);
     reload();
     emit projectSelected(selectedProjectId());
+    emit projectsChanged();
+}
+
+void ProjectTreePanel::onSetColor()
+{
+    const Id id = selectedProjectId();
+    if (id <= 0)
+        return;
+    QColor current = Qt::white;
+    for (const Project& p : m_store.listProjects(true))
+        if (p.id == id)
+            current = projectColor(p.color, p.id);
+    const QColor c = QColorDialog::getColor(current, this,
+                                            QStringLiteral("Project colour"));
+    if (!c.isValid())
+        return;
+    m_store.setProjectColor(id, c.name());
+    reload();
+    emit projectsChanged();
+}
+
+void ProjectTreePanel::onContextMenu(const QPoint& pos)
+{
+    const QModelIndex idx = m_view->indexAt(pos);
+    if (!idx.isValid())
+        return;
+    m_view->setCurrentIndex(idx);
+
+    QMenu menu(this);
+    menu.addAction(QStringLiteral("Set colour…"), this,
+                   &ProjectTreePanel::onSetColor);
+    menu.addAction(QStringLiteral("New child"), this,
+                   &ProjectTreePanel::onNewChildProject);
+    menu.addSeparator();
+    menu.addAction(QStringLiteral("Delete"), this,
+                   &ProjectTreePanel::onDeleteProject);
+    menu.exec(m_view->viewport()->mapToGlobal(pos));
 }
 
 void ProjectTreePanel::onItemChanged(QStandardItem* item)

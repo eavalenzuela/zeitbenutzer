@@ -13,6 +13,12 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent)
 {
     setWindowTitle(QStringLiteral("Settings"));
 
+    m_theme = new QComboBox(this);
+    m_theme->addItem(QStringLiteral("Light"), QStringLiteral("light"));
+    m_theme->addItem(QStringLiteral("Dark"), QStringLiteral("dark"));
+    m_theme->setCurrentIndex(
+        Settings::instance().themeName() == QStringLiteral("dark") ? 1 : 0);
+
     m_weekStart = new QComboBox(this);
     m_weekStart->addItem(QStringLiteral("Monday"), 1);
     m_weekStart->addItem(QStringLiteral("Sunday"), 7);
@@ -29,6 +35,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent)
     dataPath->setStyleSheet(QStringLiteral("color: #6b7280;"));
 
     auto* form = new QFormLayout(this);
+    form->addRow(QStringLiteral("Theme"), m_theme);
     form->addRow(QStringLiteral("Week starts on"), m_weekStart);
     form->addRow(QStringLiteral("Calendar snap"), m_snap);
     form->addRow(QStringLiteral("Data location"), dataPath);
@@ -45,6 +52,7 @@ SettingsDialog::SettingsDialog(QWidget* parent) : QDialog(parent)
 
 void SettingsDialog::save()
 {
+    Settings::instance().setThemeName(m_theme->currentData().toString());
     Settings::instance().setWeekStartDay(m_weekStart->currentData().toInt());
     Settings::instance().setSnapMinutes(m_snap->currentData().toInt());
 }

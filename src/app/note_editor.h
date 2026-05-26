@@ -24,6 +24,8 @@ public:
 
     // Persist the in-progress note immediately (call before app exit).
     void flush();
+    // Re-apply preview CSS for the current theme (call after a theme change).
+    void refreshTheme();
 
 public slots:
     void loadNote(zb::Id noteId);   // -1 clears + disables

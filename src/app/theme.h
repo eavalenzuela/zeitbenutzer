@@ -27,11 +27,18 @@ struct Theme {
 };
 
 Theme lightTheme();
+Theme darkTheme();
+// Look a theme up by name ("dark" → darkTheme(), else lightTheme()).
+Theme themeByName(const QString& name);
 
 // The active theme (defaults to lightTheme()). setCurrentTheme() is the hook
-// for future theme switching.
+// for theme switching.
 const Theme& currentTheme();
 void         setCurrentTheme(const Theme& t);
+
+// A stable, distinct display color for a project: the explicit hex if set,
+// otherwise derived deterministically from the id (golden-angle hue).
+QColor projectColor(const QString& explicitHex, qint64 id);
 
 // Generate the application-wide stylesheet for a theme.
 QString buildStyleSheet(const Theme& t);

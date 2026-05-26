@@ -157,6 +157,15 @@ void Store::renameProject(Id projectId, const QString& name)
     q.exec();
 }
 
+void Store::setProjectColor(Id projectId, const QString& hex)
+{
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral("UPDATE project SET color = ? WHERE id = ?"));
+    q.addBindValue(txt(hex));
+    q.addBindValue(projectId);
+    q.exec();
+}
+
 void Store::deleteProject(Id projectId)
 {
     QSqlQuery q(m_db.handle());
