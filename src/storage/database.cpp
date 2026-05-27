@@ -15,7 +15,7 @@ QString nextConnectionName()
 }
 
 // Schema version this build expects. Bump + add a branch in migrate() to evolve.
-constexpr int kSchemaVersion = 2;
+constexpr int kSchemaVersion = 3;
 
 // Full v1 schema. Applied in one transaction when user_version == 0.
 const char* const kSchemaV1 = R"SQL(
@@ -139,6 +139,21 @@ CREATE INDEX idx_extevent_source ON external_event(source_id);
 CREATE INDEX idx_extevent_start  ON external_event(start_utc);
 )SQL";
 
+// v3: images embedded in note markdown (referenced as `![alt](zb-img:ID)`).
+// Content-addressed by sha256 (dedups identical pastes). Exactly one of `bytes`
+// (blob backend) or `path` (files beside the db) holds the data. Unreferenced
+// rows are reclaimed by a mark-and-sweep over note bodies (see app layer).
+const char* const kSchemaV3 = R"SQL(
+CREATE TABLE image (
+    id         INTEGER PRIMARY KEY,
+    sha256     TEXT    NOT NULL UNIQUE,
+    mime       TEXT    NOT NULL,
+    bytes      BLOB,
+    path       TEXT,
+    created_at INTEGER NOT NULL
+);
+)SQL";
+
 } // namespace
 
 Database::~Database()
@@ -235,6 +250,11 @@ bool Database::migrate(QString* error)
     }
     if (version < 2) {
         runScript(kSchemaV2, &ok);
+        if (!ok)
+            return false;
+    }
+    if (version < 3) {
+        runScript(kSchemaV3, &ok);
         if (!ok)
             return false;
     }

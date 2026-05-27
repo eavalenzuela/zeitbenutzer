@@ -161,10 +161,26 @@ unterminated-fence safe, quote bar+tint).
 delimiter kept, numeric right-align, real QTextTable, noheader, delim override,
 ragged padding, unterminated-safe).
 
-### Phase 5 — Images → see Deep Dive B
+### Phase 5 — Images → see Deep Dive B ✅
 **Goal:** embedded images render; storage backend selectable; orphans collectible.
-**Scope:** largest — touches schema (v3), store API, Settings, renderer,
-`loadResource`, and a GC path.
+- **Schema v3** + Store API (`putImage` dedup, `image`, `imageIds`,
+  `deleteImage`, `setImageStorage`, `allNoteBodies`).
+- **`markdown_image.{h,cpp}`** (app layer, owns the `zb-img:` token + backend):
+  `importImageData/File` (sha256 dedup, format via QImageReader, blob or
+  `images/<sha>.<ext>` per Settings), `loadImageResource` (decode + scale to
+  `maxWidth`, no upscale), `sweepOrphanImages` (regex `zb-img:(\d+)` over note
+  bodies → delete unreferenced rows + files), `migrateImageStorage` (blob↔disk).
+- **Editor**: `MarkdownBodyEdit` accepts pasted/dropped images → import + insert
+  `![image](zb-img:ID)`; an "Insert image…" file-picker button; `MarkdownPreview`
+  overrides `loadResource` for `zb-img:ID?maxwidth=N` with a decoded-image cache.
+- **Settings**: "Image storage" combo (in-db blob / files beside db); changing it
+  runs `migrateImageStorage` (content unchanged ⇒ no cache invalidation).
+- **GC**: automatic sweep on launch + close, plus a manual "Reclaim image space"
+  menu action (reports the count).
+- **Verified** end-to-end at render level (real `<img src="zb-img:…">`, scaling,
+  dedup, sweep keeps referenced / drops orphan); disk writes isolated in tests
+  via `QStandardPaths` test mode.
+**Done.**
 
 ### Phase 6 — Wikilinks `[[…]]` + completion
 **Goal:** `[[Note title]]` becomes an in-app link; `[[` triggers completion.
@@ -357,6 +373,6 @@ cheat-sheet** of the supported markdown syntax. Decided 2026-05-27.
 - [x] Phase 2 — checkboxes (Qt renders task lists; postProcess swaps ☒→☑; tested)
 - [x] Phase 3 — syntax highlighting + code-block takeover + blockquote styling (tested)
 - [x] Phase 4 — CSV/TSV tables (segmentation + markdown_table; real QTextTable; tested)
-- [ ] Phase 5 — images
+- [x] Phase 5 — images (schema v3, blob/disk backends, paste/drop/picker, GC; tested)
 - [ ] Phase 6 — wikilinks + completion
 - [ ] Cross-cutting — in-editor syntax help panel (deferred; content grows per phase)

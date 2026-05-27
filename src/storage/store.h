@@ -8,6 +8,7 @@
 #include "storage/types.h"
 
 #include <QList>
+#include <QStringList>
 
 namespace zb {
 
@@ -31,6 +32,22 @@ public:
     Note        note(Id noteId);          // id<=0 result if not found
     void        updateNote(Id noteId, const QString& title, const QString& body);
     void        deleteNote(Id noteId);
+
+    // --- images (markdown embeds, content-addressed by sha256) ---------------
+    // Insert an image, or return the id of an existing row with the same sha256
+    // (dedup). Supply bytes (blob backend) or path (disk backend); leave the
+    // other empty.
+    Id            putImage(const QString& sha256, const QString& mime,
+                           const QByteArray& bytes, const QString& path);
+    Image         image(Id imageId);                 // id<=0 result if not found
+    QList<Id>     imageIds();                         // all stored image ids
+    void          deleteImage(Id imageId);
+    // Re-point an image at a different backend (blob<->disk migration).
+    void          setImageStorage(Id imageId, const QByteArray& bytes,
+                                  const QString& path);
+    // Every note body, for the orphan-image mark-and-sweep (the app layer knows
+    // the `zb-img:ID` token format; storage just supplies the text).
+    QStringList   allNoteBodies();
 
     // --- tasks ---------------------------------------------------------------
     Id          createTask(const Task& t);

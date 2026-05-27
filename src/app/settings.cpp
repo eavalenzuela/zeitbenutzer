@@ -49,6 +49,19 @@ void Settings::setThemeName(const QString& name)
     m_s.setValue(QStringLiteral("ui/theme"), name);
 }
 
+QString Settings::imageStorageBackend() const
+{
+    const QString b =
+        m_s.value(QStringLiteral("images/backend"), QStringLiteral("blob")).toString();
+    return b == QStringLiteral("disk") ? b : QStringLiteral("blob");
+}
+void Settings::setImageStorageBackend(const QString& backend)
+{
+    m_s.setValue(QStringLiteral("images/backend"),
+                 backend == QStringLiteral("disk") ? QStringLiteral("disk")
+                                                   : QStringLiteral("blob"));
+}
+
 QString Settings::dataLocation() const
 {
     return QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);

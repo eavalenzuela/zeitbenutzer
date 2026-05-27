@@ -4,8 +4,11 @@
 // a construction/wiring smoke, not a pixel test.
 
 #include <QApplication>
+#include <QBuffer>
 #include <QDir>
 #include <QFile>
+#include <QImage>
+#include <QStandardPaths>
 #include <QTextBlock>
 #include <QTextCursor>
 #include <QTextDocument>
@@ -18,6 +21,7 @@
 #include "app/day_review_dialog.h"
 #include "app/external_sync.h"
 #include "app/main_window.h"
+#include "app/markdown_image.h"
 #include "app/markdown_renderer.h"
 #include "app/reconcile_panel.h"
 #include "app/note_list_panel.h"
@@ -35,6 +39,9 @@ int main(int argc, char** argv)
 {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QApplication app(argc, argv);
+    // Isolate Settings + any disk-backed image writes into a temp dir, not the
+    // real app-data location.
+    QStandardPaths::setTestModeEnabled(true);
     QTextStream out(stdout);
 
     int failed = 0;
@@ -373,6 +380,52 @@ int main(int argc, char** argv)
         check("unterminated table fence is not rendered as a table",
               !MarkdownRenderer::toHtml(QStringLiteral(":::csv\na,b\n"))
                    .contains(QStringLiteral("<table")));
+    }
+
+    // Phase 5 — image embeds (import, dedup, scaling, render, orphan sweep).
+    {
+        QImage red(20, 10, QImage::Format_RGB32);
+        red.fill(Qt::red);
+        QByteArray png;
+        QBuffer buf(&png);
+        buf.open(QIODevice::WriteOnly);
+        red.save(&buf, "PNG");
+
+        const QString token = importImageData(store, png);
+        check("importImageData returns a zb-img token",
+              token.startsWith(QStringLiteral("![image](zb-img:"))
+                  && token.endsWith(QStringLiteral(")")));
+        const QString token2 = importImageData(store, png);
+        check("identical image dedups to the same token", token2 == token);
+
+        // token == "![image](zb-img:<id>)"
+        const Id imgId =
+            token.section(QStringLiteral("zb-img:"), 1).chopped(1).toLongLong();
+        check("loadImageResource returns the image at native size",
+              loadImageResource(store, imgId, 0).width() == 20);
+        check("loadImageResource scales down to maxWidth",
+              loadImageResource(store, imgId, 8).width() == 8);
+        check("loadImageResource does not upscale past native width",
+              loadImageResource(store, imgId, 100).width() == 20);
+
+        // Render path: the token becomes an <img> with our scheme + query.
+        check("image token renders as an <img> with the zb-img scheme",
+              MarkdownRenderer::toHtml(QStringLiteral("![x](zb-img:%1?maxwidth=400)")
+                                           .arg(imgId))
+                  .contains(QStringLiteral("<img src=\"zb-img:%1?maxwidth=400\"").arg(imgId)));
+
+        // Orphan sweep: a note referencing the image keeps it; remove the note
+        // and the image is reclaimed.
+        Note in;
+        in.projectId = pid;
+        in.title = QStringLiteral("has image");
+        in.bodyMd = token;
+        const Id inId = store.createNote(in);
+        check("referenced image survives the sweep",
+              sweepOrphanImages(store) == 0 && store.imageIds().contains(imgId));
+        store.deleteNote(inId);
+        check("unreferenced image is reclaimed by the sweep",
+              sweepOrphanImages(store) == 1 && !store.imageIds().contains(imgId));
     }
 
     // Themes + project colors.

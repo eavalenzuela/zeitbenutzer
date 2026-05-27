@@ -22,6 +22,9 @@ public:
     QString themeName() const;          // "light" | "dark"
     void    setThemeName(const QString& name);
 
+    QString imageStorageBackend() const; // "blob" (in the db) | "disk" (beside it)
+    void    setImageStorageBackend(const QString& backend);
+
     QString dataLocation() const;       // dir holding the DB + this ini
 
 private:

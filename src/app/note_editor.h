@@ -10,6 +10,7 @@
 
 class QLineEdit;
 class QPlainTextEdit;
+class QPushButton;
 class QTextBrowser;
 class QTimer;
 
@@ -39,9 +40,11 @@ private slots:
 
 private:
     void setEditingEnabled(bool on);
+    void insertImage();   // file-picker → import → insert token at cursor
 
     Store&          m_store;
     QLineEdit*      m_title;
+    QPushButton*    m_insertImage;
     QPlainTextEdit* m_body;
     QTextBrowser*   m_preview;
     QTimer*         m_saveTimer;
