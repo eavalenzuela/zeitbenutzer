@@ -22,6 +22,7 @@ public:
     explicit ProjectTreePanel(Store& store, QWidget* parent = nullptr);
 
     void reload();
+    void selectProject(zb::Id id); // programmatic selection (e.g. wikilink jump)
     int  projectCount() const { return m_count; } // for tests
 
 signals:

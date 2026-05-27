@@ -257,6 +257,27 @@ void Store::deleteNote(Id noteId)
     q.exec();
 }
 
+Id Store::noteIdByTitle(const QString& title)
+{
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral(
+        "SELECT id FROM note WHERE title = ? ORDER BY updated_at DESC LIMIT 1"));
+    q.addBindValue(title);
+    q.exec();
+    return q.next() ? q.value(0).toLongLong() : -1;
+}
+
+QStringList Store::noteTitles()
+{
+    QStringList out;
+    QSqlQuery q(m_db.handle());
+    q.exec(QStringLiteral(
+        "SELECT DISTINCT title FROM note WHERE title <> '' ORDER BY title"));
+    while (q.next())
+        out.append(q.value(0).toString());
+    return out;
+}
+
 // ---- images -----------------------------------------------------------------
 
 Id Store::putImage(const QString& sha256, const QString& mime,

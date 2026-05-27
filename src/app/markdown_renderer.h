@@ -20,10 +20,13 @@
 
 namespace zb {
 
-// What the later post-processing stages need (image resolution, note-relative
-// wikilinks). Phase 1 carries only the note id; nothing reads it yet.
+class Store;
+
+// What the post-processing stages need. `store` (when set) enables `[[wikilink]]`
+// resolution against note titles; nullptr leaves wikilinks as literal text.
 struct RenderContext {
-    Id noteId = -1;
+    Id     noteId = -1;
+    Store* store = nullptr;
 };
 
 namespace MarkdownRenderer {

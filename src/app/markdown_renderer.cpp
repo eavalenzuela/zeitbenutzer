@@ -4,6 +4,7 @@
 #include "app/markdown_table.h"
 #include "app/theme.h"
 #include "app/typography.h"
+#include "storage/store.h"
 
 #include <QRegularExpression>
 #include <QStringList>
@@ -268,13 +269,47 @@ QString styleBlockquotes(QString html, const Theme& th)
     return html.replace(bq, repl);
 }
 
+// Phase 6 — `[[wikilinks]]`. `[[Title]]` survives Qt's markdown as literal text
+// (no matching reference definition), so we linkify it here. A resolvable title
+// becomes an in-app anchor (zb://note/ID, handled by the preview); an unknown
+// title is left as plain `[[Title]]`. Built incrementally (not regex-replace)
+// so the generated anchors aren't reinterpreted as capture backrefs.
+QString linkifyWikilinks(const QString& html, const RenderContext& ctx, const Theme& th)
+{
+    if (!ctx.store)
+        return html;
+    static const QRegularExpression re(QStringLiteral("\\[\\[([^\\[\\]]+)\\]\\]"));
+    QString out;
+    int last = 0;
+    auto it = re.globalMatch(html);
+    while (it.hasNext()) {
+        const QRegularExpressionMatch m = it.next();
+        out += html.mid(last, m.capturedStart() - last);
+        last = m.capturedEnd();
+
+        const QString display = m.captured(1); // as it appears (may be HTML-escaped)
+        QString title = display;
+        title.replace(QStringLiteral("&amp;"), QStringLiteral("&"))
+            .replace(QStringLiteral("&lt;"), QStringLiteral("<"))
+            .replace(QStringLiteral("&gt;"), QStringLiteral(">"));
+        const Id id = ctx.store->noteIdByTitle(title.trimmed());
+        if (id > 0)
+            out += QStringLiteral("<a href=\"zb://note/%1\" style=\"color:%2;\">%3</a>")
+                       .arg(QString::number(id), th.accent.name(), display);
+        else
+            out += m.captured(0); // unresolved: leave as literal [[Title]]
+    }
+    out += html.mid(last);
+    return out;
+}
+
 // The post-process stage: operates on rendered HTML. Task checkboxes are left
 // as Qt's native ☐/☒ task-list markers (Qt draws those from the list-item
-// marker type and ignores CSS, so there's nothing to do here). Later phases add
-// image src rewriting and wikilink anchors.
-QString postProcess(QString html, const RenderContext& /*ctx*/, const Theme& th)
+// marker type and ignores CSS, so there's nothing to do here).
+QString postProcess(QString html, const RenderContext& ctx, const Theme& th)
 {
     html = styleBlockquotes(std::move(html), th);
+    html = linkifyWikilinks(html, ctx, th);
     return html;
 }
 

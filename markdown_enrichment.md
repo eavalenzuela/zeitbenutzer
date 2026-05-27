@@ -182,16 +182,26 @@ ragged padding, unterminated-safe).
   via `QStandardPaths` test mode.
 **Done.**
 
-### Phase 6 — Wikilinks `[[…]]` + completion
+### Phase 6 — Wikilinks `[[…]]` + completion ✅
 **Goal:** `[[Note title]]` becomes an in-app link; `[[` triggers completion.
-- Render: post-process `[[target]]` → `<a href="zb://note/ID">`. Resolve target
-  (by title, maybe `Project/Note`) to an id at render time via `ctx`.
-- Navigate: handle `anchorClicked` for the `zb://` scheme (don't open browser);
-  wire to load that note in the editor.
-- Completion: `QCompleter` on `m_body`, popup on `[[`, model = note titles +
-  project tree from SQLite. Insert resolves ambiguity (dup titles → disambiguate
-  by project path).
-**Scope:** medium; touches editor UI + a small navigation signal.
+- **Render:** `linkifyWikilinks` (postProcess) replaces `[[Title]]` — which
+  survives Qt's markdown as literal text — with `<a href="zb://note/ID">` when
+  the title resolves, else leaves it literal. `RenderContext` gained a `Store*`
+  (nullptr ⇒ wikilinks left as text); resolution via `Store::noteIdByTitle`
+  (most-recent on duplicate titles). Built incrementally to avoid backref reuse.
+- **Navigate:** `MarkdownPreview` uses `setOpenLinks(false)`; `NoteEditor`
+  handles `anchorClicked` — `zb://note/ID` emits `noteLinkActivated(id)`,
+  everything else opens via `QDesktopServices`. `MainWindow` routes the signal:
+  `tree->selectProject(note.projectId)` then `notes->selectNote(id)`, so the
+  sidebar follows and the editor loads (added public `selectProject`/`selectNote`).
+- **Completion:** `MarkdownBodyEdit` runs a `QCompleter` (model = `noteTitles()`,
+  refreshed each trigger) shown when the cursor is inside an unclosed `[[`;
+  accepting inserts `Title]]`. Case-insensitive.
+- **Limitation:** resolution/completion are by bare title; duplicate titles pick
+  the most-recently-updated. Project-path disambiguation deferred.
+**Done:** renderer + store lookups + editor completer/navigation + main_window
+routing; smoke checks (resolved anchor, unresolved literal, no-store literal,
+lookup/titles).
 
 ---
 
@@ -374,5 +384,5 @@ cheat-sheet** of the supported markdown syntax. Decided 2026-05-27.
 - [x] Phase 3 — syntax highlighting + code-block takeover + blockquote styling (tested)
 - [x] Phase 4 — CSV/TSV tables (segmentation + markdown_table; real QTextTable; tested)
 - [x] Phase 5 — images (schema v3, blob/disk backends, paste/drop/picker, GC; tested)
-- [ ] Phase 6 — wikilinks + completion
+- [x] Phase 6 — wikilinks + completion (render/navigate/complete; tested)
 - [ ] Cross-cutting — in-editor syntax help panel (deferred; content grows per phase)

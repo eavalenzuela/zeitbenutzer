@@ -13,6 +13,7 @@ class QPlainTextEdit;
 class QPushButton;
 class QTextBrowser;
 class QTimer;
+class QUrl;
 
 namespace zb {
 
@@ -33,10 +34,13 @@ public slots:
 
 signals:
     void noteTitleChanged(zb::Id noteId, const QString& title);
+    // A `[[wikilink]]` in the preview was clicked — open the target note.
+    void noteLinkActivated(zb::Id noteId);
 
 private slots:
     void onEdited();
     void save();
+    void onAnchorClicked(const QUrl& url);
 
 private:
     void setEditingEnabled(bool on);

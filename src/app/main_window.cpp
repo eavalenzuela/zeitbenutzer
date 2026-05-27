@@ -12,6 +12,7 @@
 #include "app/task_list_panel.h"
 #include "app/theme.h"
 #include "app/time_rollup_panel.h"
+#include "storage/store.h"
 
 #include <QApplication>
 #include <QMenu>
@@ -111,6 +112,15 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
     // editor renames flow back to the list label
     connect(m_editor, &NoteEditor::noteTitleChanged, m_notes,
             &NoteListPanel::updateNoteTitle);
+    // Clicking a [[wikilink]] jumps to the target note: select its project (which
+    // populates the notes list), then select the note (which loads the editor).
+    connect(m_editor, &NoteEditor::noteLinkActivated, this, [this](Id noteId) {
+        const Note n = m_store.note(noteId);
+        if (n.id <= 0)
+            return;
+        m_tree->selectProject(n.projectId);
+        m_notes->selectNote(noteId);
+    });
 
     // External calendars: repaint when a source's cache updates, and pull all
     // enabled sources once on launch (file reads are synchronous; URL fetches

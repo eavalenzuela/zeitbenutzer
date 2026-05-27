@@ -32,6 +32,10 @@ public:
     Note        note(Id noteId);          // id<=0 result if not found
     void        updateNote(Id noteId, const QString& title, const QString& body);
     void        deleteNote(Id noteId);
+    // Wikilink support: resolve `[[Title]]` to a note id (most-recent on
+    // duplicate titles; -1 if none), and list titles for completion.
+    Id          noteIdByTitle(const QString& title);
+    QStringList noteTitles();
 
     // --- images (markdown embeds, content-addressed by sha256) ---------------
     // Insert an image, or return the id of an existing row with the same sha256

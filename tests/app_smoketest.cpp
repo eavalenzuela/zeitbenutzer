@@ -428,6 +428,30 @@ int main(int argc, char** argv)
               sweepOrphanImages(store) == 1 && !store.imageIds().contains(imgId));
     }
 
+    // Phase 6 — wikilinks. `[[Title]]` resolves to an in-app anchor when a store
+    // is supplied; unknown titles stay literal; no store → literal.
+    {
+        Note wl;
+        wl.projectId = pid;
+        wl.title = QStringLiteral("Linked Target");
+        store.createNote(wl);
+        RenderContext ctx;
+        ctx.store = &store;
+        const QString html = MarkdownRenderer::toHtml(
+            QStringLiteral("go to [[Linked Target]] and [[No Such Note]]"), ctx);
+        check("resolved wikilink becomes a zb://note anchor",
+              html.contains(QStringLiteral("href=\"zb://note/"))
+                  && html.contains(QStringLiteral(">Linked Target</a>")));
+        check("unresolved wikilink stays literal",
+              html.contains(QStringLiteral("[[No Such Note]]")));
+        check("wikilinks need a store (none → literal text)",
+              MarkdownRenderer::toHtml(QStringLiteral("[[Linked Target]]"))
+                  .contains(QStringLiteral("[[Linked Target]]")));
+        check("noteIdByTitle/noteTitles back link resolution + completion",
+              store.noteIdByTitle(QStringLiteral("Linked Target")) > 0
+                  && store.noteTitles().contains(QStringLiteral("Linked Target")));
+    }
+
     // Themes + project colors.
     applyTheme(app, darkTheme());
     check("dark theme applies", currentTheme().name == QStringLiteral("dark"));
