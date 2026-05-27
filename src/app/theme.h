@@ -24,6 +24,12 @@ struct Theme {
     QColor  accentText;  // text drawn on accent
     QColor  hover;       // toolbar button hover
     QColor  codeBg;      // inline-code / preformatted background
+    QColor  quoteBg;     // blockquote background tint
+    // Syntax-highlight palette for fenced code blocks (Phase 3).
+    QColor  synKeyword;
+    QColor  synString;
+    QColor  synNumber;
+    QColor  synComment;
 };
 
 Theme lightTheme();

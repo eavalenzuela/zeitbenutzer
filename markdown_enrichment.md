@@ -103,31 +103,46 @@ visually identical to today.
 notes; fall back to vendored md4c if needed.
 
 ### Phase 2 — Checkboxes ✅
-**Goal:** `- [ ]` / `- [x]` render as ☐ / ☑.
+**Goal:** `- [ ]` / `- [x]` render as native task-list checkboxes.
 - **Finding:** Qt's GitHub dialect already parses task lists, emitting
-  `<li class="unchecked/checked">` with `::marker` glyphs, and they survive the
-  Phase 1 `toHtml→setHtml` round-trip as real `Unchecked`/`Checked` block
-  markers. So rendering came for free with the seam.
-- **What we did:** the only gap was the glyph — Qt uses ☒ (U+2612) for done; we
-  prefer ☑ (U+2611). The renderer's `postProcess` stage swaps that one glyph
-  (`applyCheckboxGlyph`, the first real use of the post-process stage). Source
-  text remains the toggle mechanism; no widget, no click handler.
+  `<li class="unchecked/checked">`, and they survive the Phase 1
+  `toHtml→setHtml` round-trip as real `Unchecked`/`Checked` block markers. So
+  rendering came for free with the seam.
+- **Glyph:** Qt draws ☐ (empty) and ☒ (done) from the list-item *marker type*
+  and **ignores the `::marker content` CSS** at layout time — verified visually
+  that editing that CSS had no effect on the rendered glyph. So we accept Qt's
+  native ☐/☒ (☒ = "ballot box with X" is a standard "done" mark). An earlier
+  attempt to force ☑ via a CSS swap was a no-op and was removed.
+- Source text remains the toggle mechanism; no widget, no click handler.
 - Optional later: click-to-toggle by mapping preview position → source line.
-**Done:** `markdown_renderer.cpp` postProcess + smoke checks (markers survive the
-seam; done glyph is ☑).
+**Done:** native rendering through the seam + smoke check (markers survive as
+`Unchecked`/`Checked`).
 
-### Phase 3 — Syntax highlighting (hand-rolled)
-**Goal:** fenced code blocks colored per language.
-- Owned fence handling in segmentation: ```` ```lang ```` → highlighted `<pre>`.
-- Per-language tokenizers emitting inline `<span style="color:…">`. Colors from
-  theme so they read in light/dark.
-- **Target languages:** Python, shell, JavaScript/TypeScript/Node (one shared
-  JS-family lexer), JSON, YAML/config.
-- Unknown/absent lang → plain themed `<pre>` (today's behavior).
-- Structure: a `Highlighter` interface + small per-language lexers; a registry
-  keyed by fence info-string (with aliases: `js`/`ts`/`node`, `sh`/`bash`/`zsh`,
-  `yml`/`yaml`).
-**Scope:** medium; additive per language.
+### Phase 3 — Syntax highlighting (hand-rolled) ✅
+**Goal:** fenced code blocks colored per language. Also took over code rendering
+to fix Qt's lossy per-line `<pre>` serialization, and styled blockquotes.
+- **Code segmentation now real:** `extractCodeBlocks` lifts ```` ``` ````/`~~~`
+  fences out (≤3-space indent, matched close), rendered standard markdown over
+  placeholder paragraphs, then `spliceCodeBlocks` swaps each placeholder for one
+  clean `<pre white-space:pre>` — single block, indentation preserved, bundled
+  monospace font. Splice is positional (not regex-backref) so code containing
+  `\1` can't corrupt output. Unterminated fence → left as text (Qt still renders
+  it as a plain code block to EOF; just unhighlighted).
+- **Highlighter** (`code_highlight.{h,cpp}`): one generic lexer driven by a
+  per-language `LangSpec` (keywords, line/block comments, string styles incl.
+  Python triple + JS template), emitting themed `<span style="color:…">` for
+  keyword/string/number/comment. Aliases resolve `js/ts/node/jsx/tsx`,
+  `sh/bash/zsh`, `yml/yaml`, `py`. Unknown lang → escaped verbatim.
+- **Theme palette:** added `synKeyword/synString/synNumber/synComment` (+
+  `quoteBg`) to `Theme`, GitHub-ish light/dark values; rendered live via
+  `currentTheme()` so theme switch re-colors.
+- **Blockquotes:** Qt emits no `<blockquote>` element and ignores CSS borders on
+  paragraphs (verified), so the literal `|` bar is impossible. Instead
+  `styleBlockquotes` matches the `margin-left:40px; margin-right:40px` signature
+  and adds a background tint + a leading ▎ bar glyph — both render.
+**Done:** segmentation/splice/highlighter/blockquote + smoke checks (single
+`<pre>`, indentation kept, themed keyword color, unknown-lang verbatim,
+unterminated-fence safe, quote bar+tint).
 
 ### Phase 4 — CSV/TSV tables (custom flavor) → see Deep Dive A
 **Goal:** `:::csv … :::` (and `:::tsv`) fenced blocks render as `<table>`.
@@ -327,7 +342,7 @@ cheat-sheet** of the supported markdown syntax. Decided 2026-05-27.
 - [x] Phase 1 — converter seam (`markdown_renderer.{h,cpp}`; preview routes
       through `MarkdownRenderer::toHtml`; Qt-engine standard render; smoke-tested)
 - [x] Phase 2 — checkboxes (Qt renders task lists; postProcess swaps ☒→☑; tested)
-- [ ] Phase 3 — syntax highlighting
+- [x] Phase 3 — syntax highlighting + code-block takeover + blockquote styling (tested)
 - [ ] Phase 4 — CSV/TSV tables
 - [ ] Phase 5 — images
 - [ ] Phase 6 — wikilinks + completion

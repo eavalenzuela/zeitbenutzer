@@ -282,19 +282,24 @@ int main(int argc, char** argv)
         check("renderer survives empty input",
               !MarkdownRenderer::toHtml(QString()).isEmpty());
 
-        // Parity with the old setMarkdown path: a document built through the new
-        // HTML seam must carry the same textual content as one Qt parses from
-        // the same markdown directly. (Content parity; holds while the renderer
-        // is pure standard markdown — revisit once custom syntax diverges it.)
-        const QString sample = QStringLiteral(
-            "# Heading\n\nSome **bold** and *italic* and `code`.\n\n"
-            "- item one\n- item two\n\n> a quote\n\n[link](https://example.test)\n");
+        // Parity with the old setMarkdown path on a single inline-formatted line
+        // (no lists/quotes/multi-line, which the seam now intentionally diverges
+        // on via checkboxes/quote-bar/hard-breaks): inline prose still round-trips.
+        const QString sample =
+            QStringLiteral("Some **bold**, *italic*, and `code` in one line.");
         QTextDocument direct;
         direct.setMarkdown(sample, QTextDocument::MarkdownDialectGitHub);
         QTextDocument viaSeam;
         viaSeam.setHtml(MarkdownRenderer::toHtml(sample));
-        check("HTML seam preserves the markdown's text content",
+        check("HTML seam preserves inline prose content",
               viaSeam.toPlainText() == direct.toPlainText());
+
+        // Hard-wrap preference: a single newline becomes a line break, while a
+        // blank line still separates paragraphs.
+        QTextDocument hb;
+        hb.setHtml(MarkdownRenderer::toHtml(QStringLiteral("first line\nsecond line\n")));
+        check("single newline renders as a hard line break",
+              hb.toPlainText().contains(QStringLiteral("first line\nsecond line")));
 
         // Phase 2 — task checkboxes. `- [ ]`/`- [x]` survive the seam as real
         // checkbox markers, and the done glyph is our preferred ☑ (U+2611).
@@ -308,11 +313,32 @@ int main(int argc, char** argv)
             sawUnchecked |= (m == QTextBlockFormat::MarkerType::Unchecked);
             sawChecked |= (m == QTextBlockFormat::MarkerType::Checked);
         }
-        check("checkboxes render as task markers through the seam",
-              sawUnchecked && sawChecked);
-        check("done checkbox uses the ☑ glyph (U+2611), not ☒",
-              tasks.contains(QStringLiteral("\\2611"))
-                  && !tasks.contains(QStringLiteral("\\2612")));
+        check("checkboxes render as native task markers through the seam",
+              sawUnchecked && sawChecked); // Qt draws ☐/☒ from the marker type
+
+        // Phase 3 — fenced code blocks: one <pre>, preserved indentation, themed
+        // keyword color; unknown language degrades to verbatim; blockquotes get
+        // the bar + tint. (Runs before the theme switches below, so currentTheme
+        // is the default light theme.)
+        const QString code = MarkdownRenderer::toHtml(QStringLiteral(
+            "```python\ndef f():\n        return 1  # c\n```\n"));
+        check("code block renders as a single <pre>",
+              code.count(QStringLiteral("<pre")) == 1);
+        check("code keyword is colored from the theme",
+              code.contains(QStringLiteral("color:%1").arg(lightTheme().synKeyword.name())));
+        check("code indentation is preserved",
+              code.contains(QStringLiteral("        <span"))); // 8 leading spaces kept
+        const QString unk = MarkdownRenderer::toHtml(
+            QStringLiteral("```nosuchlang\nx = 1\n```\n"));
+        check("unknown language still renders code verbatim",
+              unk.contains(QStringLiteral("<pre")) && unk.contains(QStringLiteral("x = 1")));
+        check("unterminated fence doesn't drop later content",
+              MarkdownRenderer::toHtml(QStringLiteral("```\nstill typing\n"))
+                  .contains(QStringLiteral("still typing")));
+        const QString quote = MarkdownRenderer::toHtml(QStringLiteral("> quoted line\n"));
+        check("blockquote gets a bar glyph and a background tint",
+              quote.contains(QString::fromUtf8("▎"))
+                  && quote.contains(QStringLiteral("background-color")));
     }
 
     // Themes + project colors.
