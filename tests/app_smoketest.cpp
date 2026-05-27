@@ -6,6 +6,8 @@
 #include <QApplication>
 #include <QDir>
 #include <QFile>
+#include <QTextBlock>
+#include <QTextDocument>
 #include <QTextStream>
 
 #include "app/adopt_dialog.h"
@@ -14,6 +16,7 @@
 #include "app/day_review_dialog.h"
 #include "app/external_sync.h"
 #include "app/main_window.h"
+#include "app/markdown_renderer.h"
 #include "app/reconcile_panel.h"
 #include "app/note_list_panel.h"
 #include "app/project_tree_panel.h"
@@ -259,6 +262,57 @@ int main(int argc, char** argv)
               editor.source().name == QStringLiteral("My feed")
                   && editor.source().kind == ExternalSource::Kind::Url);
         QFile::remove(path);
+    }
+
+    // Markdown converter seam (Phase 1): the renderer owns markdown→HTML; verify
+    // the standard constructs still produce the expected HTML and it's robust to
+    // empty/edge input. This is the chokepoint later phases hang custom syntax on.
+    {
+        const QString h = MarkdownRenderer::toHtml(QStringLiteral("# Title"));
+        check("renderer emits a heading", h.contains(QStringLiteral("<h1")));
+        const QString list =
+            MarkdownRenderer::toHtml(QStringLiteral("- one\n- two"));
+        check("renderer emits list items", list.contains(QStringLiteral("<li")));
+        const QString link = MarkdownRenderer::toHtml(
+            QStringLiteral("[x](https://example.test)"));
+        check("renderer emits a link", link.contains(QStringLiteral("href")));
+        check("renderer preserves prose text",
+              MarkdownRenderer::toHtml(QStringLiteral("hello world"))
+                  .contains(QStringLiteral("hello world")));
+        check("renderer survives empty input",
+              !MarkdownRenderer::toHtml(QString()).isEmpty());
+
+        // Parity with the old setMarkdown path: a document built through the new
+        // HTML seam must carry the same textual content as one Qt parses from
+        // the same markdown directly. (Content parity; holds while the renderer
+        // is pure standard markdown — revisit once custom syntax diverges it.)
+        const QString sample = QStringLiteral(
+            "# Heading\n\nSome **bold** and *italic* and `code`.\n\n"
+            "- item one\n- item two\n\n> a quote\n\n[link](https://example.test)\n");
+        QTextDocument direct;
+        direct.setMarkdown(sample, QTextDocument::MarkdownDialectGitHub);
+        QTextDocument viaSeam;
+        viaSeam.setHtml(MarkdownRenderer::toHtml(sample));
+        check("HTML seam preserves the markdown's text content",
+              viaSeam.toPlainText() == direct.toPlainText());
+
+        // Phase 2 — task checkboxes. `- [ ]`/`- [x]` survive the seam as real
+        // checkbox markers, and the done glyph is our preferred ☑ (U+2611).
+        const QString tasks =
+            MarkdownRenderer::toHtml(QStringLiteral("- [ ] todo\n- [x] done\n"));
+        QTextDocument tdoc;
+        tdoc.setHtml(tasks);
+        bool sawUnchecked = false, sawChecked = false;
+        for (QTextBlock b = tdoc.begin(); b != tdoc.end(); b = b.next()) {
+            const auto m = b.blockFormat().marker();
+            sawUnchecked |= (m == QTextBlockFormat::MarkerType::Unchecked);
+            sawChecked |= (m == QTextBlockFormat::MarkerType::Checked);
+        }
+        check("checkboxes render as task markers through the seam",
+              sawUnchecked && sawChecked);
+        check("done checkbox uses the ☑ glyph (U+2611), not ☒",
+              tasks.contains(QStringLiteral("\\2611"))
+                  && !tasks.contains(QStringLiteral("\\2612")));
     }
 
     // Themes + project colors.

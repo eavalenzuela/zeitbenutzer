@@ -42,6 +42,7 @@ add_library(zb-app STATIC
     src/app/reconcile_panel.cpp
     src/app/day_review_dialog.cpp
     src/app/note_editor.cpp
+    src/app/markdown_renderer.cpp
     src/app/typography.cpp
     src/app/theme.cpp
     src/app/settings.cpp

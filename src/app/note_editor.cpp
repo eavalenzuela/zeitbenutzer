@@ -1,5 +1,6 @@
 #include "app/note_editor.h"
 
+#include "app/markdown_renderer.h"
 #include "app/theme.h"
 #include "app/typography.h"
 #include "storage/store.h"
@@ -71,7 +72,7 @@ void NoteEditor::loadNote(Id noteId)
         const Note n = m_store.note(noteId);
         m_title->setText(n.title);
         m_body->setPlainText(n.bodyMd);
-        m_preview->setMarkdown(n.bodyMd);
+        m_preview->setHtml(MarkdownRenderer::toHtml(n.bodyMd, {m_noteId}));
         setEditingEnabled(true);
     }
     m_loading = false;
@@ -81,7 +82,7 @@ void NoteEditor::onEdited()
 {
     if (m_loading || m_noteId <= 0)
         return;
-    m_preview->setMarkdown(m_body->toPlainText());
+    m_preview->setHtml(MarkdownRenderer::toHtml(m_body->toPlainText(), {m_noteId}));
     m_saveTimer->start(); // (re)arm debounce
 }
 
@@ -106,7 +107,8 @@ void NoteEditor::refreshTheme()
 {
     stylePreview(m_preview, currentTheme());
     if (m_noteId > 0)
-        m_preview->setMarkdown(m_body->toPlainText()); // re-render with new CSS
+        m_preview->setHtml(MarkdownRenderer::toHtml(m_body->toPlainText(),
+                                                    {m_noteId})); // re-render w/ new CSS
 }
 
 } // namespace zb
