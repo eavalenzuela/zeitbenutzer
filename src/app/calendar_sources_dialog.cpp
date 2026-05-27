@@ -183,6 +183,10 @@ CalendarSourcesDialog::CalendarSourcesDialog(Store& store, ExternalSync& sync,
         m_edit->setEnabled(has);
         m_remove->setEnabled(has);
     });
+    // Report a fetch/parse failure while the user is here acting on a source.
+    connect(&m_sync, &ExternalSync::failed, this, [this](const QString& msg) {
+        QMessageBox::warning(this, QStringLiteral("Calendar sync failed"), msg);
+    });
 
     reloadList();
 }

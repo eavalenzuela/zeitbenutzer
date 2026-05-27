@@ -234,6 +234,18 @@ int main(int argc, char** argv)
         app.processEvents();
         check("adopt dialog constructs headless", true);
 
+        // A bad source reports a failure rather than failing silently. (Checked
+        // before opening the sources dialog, whose live failed() handler would
+        // pop a modal box that can't be dismissed headless.)
+        ExternalSource bad;
+        bad.kind = ExternalSource::Kind::File;
+        bad.location = QStringLiteral("/nonexistent/zb-no-such.ics");
+        int fails = 0;
+        QObject::connect(&sync, &ExternalSync::failed, [&] { ++fails; });
+        sync.refreshSource(bad);
+        app.processEvents();
+        check("a bad source emits failed()", fails == 1);
+
         // Sources management dialogs construct headless and round-trip a source.
         CalendarSourcesDialog sources(store, sync);
         SourceEditDialog editor;

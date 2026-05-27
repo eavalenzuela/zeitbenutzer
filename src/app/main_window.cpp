@@ -16,6 +16,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QSplitter>
+#include <QStatusBar>
 #include <QTabWidget>
 
 namespace zb {
@@ -103,6 +104,10 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
     // land asynchronously and trigger another reload when they arrive).
     connect(m_sync, &ExternalSync::refreshed, m_calendar,
             &CalendarView::reload);
+    // Surface sync problems non-modally (e.g. a bad URL on launch).
+    connect(m_sync, &ExternalSync::failed, this, [this](const QString& msg) {
+        statusBar()->showMessage(QStringLiteral("Calendar: ") + msg, 8000);
+    });
     m_sync->refreshAll();
 }
 
