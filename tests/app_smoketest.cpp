@@ -8,6 +8,7 @@
 #include <QFile>
 #include <QTextStream>
 
+#include "app/adopt_dialog.h"
 #include "app/calendar_view.h"
 #include "app/day_review_dialog.h"
 #include "app/external_sync.h"
@@ -189,6 +190,9 @@ int main(int argc, char** argv)
             "BEGIN:VEVENT\r\nUID:sync-1\r\nSUMMARY:Imported event\r\n"
             "DTSTART:" + stamp + "T130000Z\r\n"
             "DTEND:" + stamp + "T140000Z\r\n"
+            "END:VEVENT\r\n"
+            "BEGIN:VEVENT\r\nUID:allday-sync\r\nSUMMARY:All-day import\r\n"
+            "DTSTART;VALUE=DATE:" + stamp + "\r\n"
             "END:VEVENT\r\nEND:VCALENDAR\r\n";
         const QString path =
             QDir(QDir::tempPath()).filePath(QStringLiteral("zb_sync_test.ics"));
@@ -214,8 +218,20 @@ int main(int argc, char** argv)
         const QDate today = QDate::currentDate();
         const QDateTime ws(today.addDays(-1), QTime(0, 0));
         const QDateTime we(today.addDays(1), QTime(23, 59, 59));
-        check("synced event is cached and queryable",
-              store.externalEventsInRange(ws, we).size() == 1);
+        check("synced events are cached and queryable",
+              store.externalEventsInRange(ws, we).size() == 2);
+
+        // The calendar overlay: an all-day event opens the all-day band.
+        const double bandBefore = w.calendarView()->allDayBandHeight();
+        w.calendarView()->reload();
+        app.processEvents();
+        check("all-day external event opens the all-day band",
+              bandBefore == 0.0 && w.calendarView()->allDayBandHeight() > 0.0);
+
+        // Adopt dialog constructs headless.
+        AdoptDialog adopt(store, QStringLiteral("All-day import"));
+        app.processEvents();
+        check("adopt dialog constructs headless", true);
         QFile::remove(path);
     }
 

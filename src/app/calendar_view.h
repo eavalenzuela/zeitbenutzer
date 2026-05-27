@@ -34,6 +34,7 @@ public:
     void  setActiveProject(Id p) { m_activeProject = p; }
     void  reload();
     int   occurrenceCount() const { return m_occ.size(); } // for tests
+    double allDayBandHeight() const { return m_allDayBandH; } // for tests
 
 signals:
     void weekChanged();
@@ -45,11 +46,17 @@ protected:
     void mouseMoveEvent(QMouseEvent* e) override;
     void mouseReleaseEvent(QMouseEvent* e) override;
     void mouseDoubleClickEvent(QMouseEvent* e) override;
+    void contextMenuEvent(QContextMenuEvent* e) override;
 
 private:
     // --- layout math (all in viewport == scene coordinates) -----------------
     static constexpr double kGutter = 54.0; // hour-label column
     static constexpr double kHeader = 34.0; // day-header band
+    // All-day band (between the header and the time grid): read-only external
+    // all-day events stack here, one row per event, capped with a "+N" chip.
+    static constexpr double kAllDayRowH = 18.0;
+    static constexpr double kAllDayPad = 3.0;
+    static constexpr int    kMaxAllDayRows = 3;
     // Each day column splits into a planned lane (left) and an actual lane
     // (right) — the plan-vs-actual view.
     enum class Lane { Planned, Actual };
@@ -59,6 +66,8 @@ private:
     double ppm() const;                 // pixels per minute
     double xForDay(int d) const;
     double xForLane(int d, Lane lane) const;
+    // Top of the time grid: header + the (data-driven) all-day band height.
+    double gridTop() const { return kHeader + m_allDayBandH; }
     double yForMinutes(double m) const;
     int    dayAt(double x) const;       // 0..6, or -1 in the gutter
     double minutesAt(double y) const;   // 0..1440 (unsnapped)
@@ -67,6 +76,11 @@ private:
     // Topmost occurrence under pos. Fills edge (-1 top,0 body,1 bottom) and the
     // lane hit. Returns -1 on miss.
     int    hitTest(const QPointF& pos, int* edge, Lane* lane) const;
+    // The all-day pill rect for the r-th external event shown on day d.
+    QRectF allDayPillRect(int day, int row) const;
+    // Index into m_external of the read-only event under pos (band or timed),
+    // or -1. Used by the right-click "adopt" path.
+    int    hitTestExternal(const QPointF& pos) const;
 
     QDateTime dayTime(const QDate& day, double minutes) const;
 
@@ -75,6 +89,11 @@ private:
     Id                m_activeProject = -1;
     QList<Occurrence> m_occ;
     QHash<Id, QColor> m_projectColors;  // rebuilt on reload; drives block color
+
+    // External read-only overlay (module 6), rebuilt on reload.
+    QList<ExternalEvent> m_external;
+    QList<QList<int>>    m_allDayByDay; // per weekday: indices into m_external
+    double               m_allDayBandH = 0.0;
 
     // --- interaction ---------------------------------------------------------
     enum class Mode { None, Create, Move, ResizeTop, ResizeBottom };
@@ -95,6 +114,7 @@ public:
 
     void reload();
     int  occurrenceCount() const; // for tests
+    double allDayBandHeight() const; // for tests
     // Re-align the viewed week to the (possibly changed) week-start setting.
     void applySettings();
 
