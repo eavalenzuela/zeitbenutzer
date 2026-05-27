@@ -38,6 +38,8 @@ add_library(zb-app STATIC
     src/app/calendar_view.cpp
     src/app/block_dialog.cpp
     src/app/block_edit_dialog.cpp
+    src/app/reconcile_panel.cpp
+    src/app/day_review_dialog.cpp
     src/app/note_editor.cpp
     src/app/typography.cpp
     src/app/theme.cpp

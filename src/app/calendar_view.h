@@ -103,6 +103,7 @@ public slots:
     void goToday();
     void goPrev();
     void goNext();
+    void reviewToday();
 
 private:
     void updateLabel();

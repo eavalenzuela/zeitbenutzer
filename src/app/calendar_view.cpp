@@ -2,6 +2,8 @@
 
 #include "app/block_dialog.h"
 #include "app/block_edit_dialog.h"
+#include "app/day_review_dialog.h"
+#include "app/reconcile_panel.h"
 #include "app/settings.h"
 #include "app/theme.h"
 #include "storage/recurrence.h"
@@ -10,6 +12,7 @@
 #include <QGraphicsScene>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QPushButton>
@@ -530,21 +533,9 @@ void CalGrid::mouseDoubleClickEvent(QMouseEvent* e)
                               : -1);
         if (id > 0) {
             m_store.updateBlockMeta(id, dlg.title(), dlg.projectId());
-            // Reconcile: record (or clear) actual times per the chosen status.
-            switch (dlg.status()) {
-            case BlockStatus::Done:
-                m_store.reconcileBlock(id, dlg.actualStart(), dlg.actualEnd(),
-                                       BlockStatus::Done);
-                break;
-            case BlockStatus::Skipped:
-                m_store.reconcileBlock(id, QDateTime(), QDateTime(),
-                                       BlockStatus::Skipped);
-                break;
-            default: // Planned → un-reconcile (clear actuals)
-                m_store.reconcileBlock(id, QDateTime(), QDateTime(),
-                                       BlockStatus::Planned);
-                break;
-            }
+            // Reconcile: record actuals / skip / carry per the chosen status.
+            applyOutcome(m_store, id, dlg.status(), dlg.actualStart(),
+                         dlg.actualEnd(), dlg.carryTarget());
         }
         break;
     }
@@ -585,12 +576,14 @@ CalendarView::CalendarView(Store& store, QWidget* parent)
     auto* next = new QPushButton(QStringLiteral("▶"), this);
     for (QPushButton* b : {prev, today, next})
         b->setMaximumWidth(b == today ? 80 : 36);
+    auto* review = new QPushButton(QStringLiteral("Review today"), this);
     m_label = new QLabel(this);
     bar->addWidget(prev);
     bar->addWidget(today);
     bar->addWidget(next);
     bar->addSpacing(10);
     bar->addWidget(m_label, 1);
+    bar->addWidget(review);
     layout->addLayout(bar);
 
     m_grid = new CalGrid(store, this);
@@ -599,6 +592,7 @@ CalendarView::CalendarView(Store& store, QWidget* parent)
     connect(prev, &QPushButton::clicked, this, &CalendarView::goPrev);
     connect(today, &QPushButton::clicked, this, &CalendarView::goToday);
     connect(next, &QPushButton::clicked, this, &CalendarView::goNext);
+    connect(review, &QPushButton::clicked, this, &CalendarView::reviewToday);
     connect(m_grid, &CalGrid::weekChanged, this, &CalendarView::updateLabel);
 
     reload();
@@ -643,6 +637,34 @@ void CalendarView::goNext()
 {
     m_grid->setWeekStart(m_grid->weekStart().addDays(7));
     updateLabel();
+}
+
+void CalendarView::reviewToday()
+{
+    const QDate today = QDate::currentDate();
+    const QDateTime dayStart(today, QTime(0, 0));
+    const QDateTime dayEnd(today, QTime(23, 59, 59));
+
+    QList<Occurrence> queue;
+    for (const Occurrence& o : m_store.occurrencesInRange(dayStart, dayEnd)) {
+        if (o.status == BlockStatus::Planned && !o.skipped)
+            queue.append(o);
+    }
+    std::sort(queue.begin(), queue.end(),
+              [](const Occurrence& a, const Occurrence& b) {
+                  return a.plannedStart < b.plannedStart;
+              });
+
+    if (queue.isEmpty()) {
+        QMessageBox::information(
+            this, QStringLiteral("Review today"),
+            QStringLiteral("Nothing to review — today's all reconciled."));
+        return;
+    }
+
+    DayReviewDialog dlg(m_store, queue, this);
+    dlg.exec();
+    reload();
 }
 
 } // namespace zb

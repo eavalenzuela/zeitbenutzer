@@ -7,7 +7,9 @@
 #include <QTextStream>
 
 #include "app/calendar_view.h"
+#include "app/day_review_dialog.h"
 #include "app/main_window.h"
+#include "app/reconcile_panel.h"
 #include "app/note_list_panel.h"
 #include "app/project_tree_panel.h"
 #include "app/task_list_panel.h"
@@ -124,6 +126,56 @@ int main(int argc, char** argv)
     app.processEvents();
     check("time rollup reports this-week planned minutes",
           w.timePanel()->weekPlanned() >= 60);
+
+    // Reconcile + the guided evening-review walk.
+    {
+        const QDate today = QDate::currentDate();
+        const QDate tomorrow = today.addDays(1);
+        const QDateTime ds(today, QTime(0, 0)), de(today, QTime(23, 59, 59));
+
+        // Grab today's phantom standup occurrence (a series slot, not yet
+        // materialized) and carry it over via the shared helper.
+        Occurrence phantom;
+        bool found = false;
+        for (const Occurrence& o : store.occurrencesInRange(ds, de)) {
+            if (o.seriesId && !o.materialized) {
+                phantom = o;
+                found = true;
+                break;
+            }
+        }
+        check("a phantom occurrence is available to reconcile", found);
+
+        const Id carriedId = applyReconcile(store, phantom, BlockStatus::Carried,
+                                            QDateTime(), QDateTime(), tomorrow);
+        check("applyReconcile(Carried) materializes the origin block",
+              carriedId > 0);
+
+        const auto span = store.occurrencesInRange(
+            ds, QDateTime(tomorrow, QTime(23, 59, 59)));
+        bool originCarried = false, cloneNextDay = false;
+        for (const auto& o : span) {
+            if (o.blockId == carriedId)
+                originCarried = (o.status == BlockStatus::Carried
+                                 && o.occurrenceDate == today);
+            else if (o.materialized && o.occurrenceDate == tomorrow
+                     && o.status == BlockStatus::Planned)
+                cloneNextDay = true;
+        }
+        check("origin stays on its day marked Carried", originCarried);
+        check("a Planned clone lands on the next day", cloneNextDay);
+
+        // The review walk consumes the day's still-unreconciled occurrences.
+        QList<Occurrence> queue;
+        for (const Occurrence& o : store.occurrencesInRange(ds, de))
+            if (o.status == BlockStatus::Planned && !o.skipped)
+                queue.append(o);
+        check("review queue holds today's unreconciled blocks",
+              !queue.isEmpty());
+        DayReviewDialog review(store, queue);
+        app.processEvents();
+        check("review dialog constructs headless", true);
+    }
 
     // Themes + project colors.
     applyTheme(app, darkTheme());

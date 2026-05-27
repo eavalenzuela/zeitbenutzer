@@ -1,17 +1,15 @@
 #include "app/block_edit_dialog.h"
 
 #include "app/block_dialog.h" // fillProjectCombo
+#include "app/reconcile_panel.h"
 #include "storage/store.h"
 
 #include <QComboBox>
 #include <QDialogButtonBox>
 #include <QFormLayout>
-#include <QHBoxLayout>
-#include <QLabel>
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QPushButton>
-#include <QTimeEdit>
 
 namespace zb {
 
@@ -23,34 +21,12 @@ BlockEditDialog::BlockEditDialog(Store& store, bool partOfSeries, QWidget* paren
     m_title = new QLineEdit(this);
     m_project = new QComboBox(this);
     fillProjectCombo(m_project, store);
-
-    // Reconcile controls.
-    m_status = new QComboBox(this);
-    m_status->addItems({QStringLiteral("Planned"), QStringLiteral("Done"),
-                        QStringLiteral("Skipped")});
-    m_actStart = new QTimeEdit(this);
-    m_actEnd = new QTimeEdit(this);
-    m_actStart->setDisplayFormat(QStringLiteral("HH:mm"));
-    m_actEnd->setDisplayFormat(QStringLiteral("HH:mm"));
-    m_samePlanned = new QPushButton(QStringLiteral("= planned"), this);
-
-    auto* actualRow = new QHBoxLayout;
-    actualRow->addWidget(m_actStart);
-    actualRow->addWidget(new QLabel(QStringLiteral("–"), this));
-    actualRow->addWidget(m_actEnd);
-    actualRow->addWidget(m_samePlanned);
-    actualRow->addStretch(1);
+    m_reconcile = new ReconcilePanel(this);
 
     auto* form = new QFormLayout(this);
     form->addRow(QStringLiteral("Title"), m_title);
     form->addRow(QStringLiteral("Project"), m_project);
-    form->addRow(QStringLiteral("Status"), m_status);
-    form->addRow(QStringLiteral("Actual"), actualRow);
-
-    connect(m_status, &QComboBox::currentIndexChanged, this,
-            &BlockEditDialog::onStatusChanged);
-    connect(m_samePlanned, &QPushButton::clicked, this,
-            &BlockEditDialog::onSameAsPlanned);
+    form->addRow(m_reconcile);
 
     auto* buttons = new QDialogButtonBox(
         QDialogButtonBox::Save | QDialogButtonBox::Cancel, this);
@@ -78,59 +54,14 @@ void BlockEditDialog::setInitial(const QString& title, std::optional<Id> project
         m_project->findData(static_cast<qlonglong>(project ? *project : -1));
     m_project->setCurrentIndex(idx >= 0 ? idx : 0);
 
-    m_date = plannedStart.date();
-    m_plannedStartT = plannedStart.time();
-    m_plannedEndT = plannedEnd.time();
-
-    // Map BlockStatus to the 3-item combo (Carried isn't offered here).
-    int sIdx = 0;
-    if (status == BlockStatus::Done)
-        sIdx = 1;
-    else if (status == BlockStatus::Skipped)
-        sIdx = 2;
-    m_status->setCurrentIndex(sIdx);
-
-    // Default the actual times to the recorded actuals, else the planned span.
-    m_actStart->setTime((actualStart && actualStart->isValid())
-                            ? actualStart->time()
-                            : plannedStart.time());
-    m_actEnd->setTime((actualEnd && actualEnd->isValid()) ? actualEnd->time()
-                                                          : plannedEnd.time());
-    onStatusChanged();
+    m_reconcile->setInitial(plannedStart, plannedEnd, status, actualStart,
+                            actualEnd);
 }
 
-void BlockEditDialog::onStatusChanged()
-{
-    const bool done = (m_status->currentIndex() == 1);
-    m_actStart->setEnabled(done);
-    m_actEnd->setEnabled(done);
-    m_samePlanned->setEnabled(done);
-}
-
-void BlockEditDialog::onSameAsPlanned()
-{
-    m_actStart->setTime(m_plannedStartT);
-    m_actEnd->setTime(m_plannedEndT);
-}
-
-BlockStatus BlockEditDialog::status() const
-{
-    switch (m_status->currentIndex()) {
-    case 1: return BlockStatus::Done;
-    case 2: return BlockStatus::Skipped;
-    default: return BlockStatus::Planned;
-    }
-}
-
-QDateTime BlockEditDialog::actualStart() const
-{
-    return QDateTime(m_date, m_actStart->time());
-}
-
-QDateTime BlockEditDialog::actualEnd() const
-{
-    return QDateTime(m_date, m_actEnd->time());
-}
+BlockStatus BlockEditDialog::status() const { return m_reconcile->status(); }
+QDateTime BlockEditDialog::actualStart() const { return m_reconcile->actualStart(); }
+QDateTime BlockEditDialog::actualEnd() const { return m_reconcile->actualEnd(); }
+QDate BlockEditDialog::carryTarget() const { return m_reconcile->carryTarget(); }
 
 QString BlockEditDialog::title() const { return m_title->text().trimmed(); }
 

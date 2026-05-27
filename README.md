@@ -25,9 +25,12 @@ organizes them temporally. See [`DESIGN.md`](./DESIGN.md) for the full design.
   occurrences; editing one materializes it. Double-click to edit/delete (single
   occurrence vs whole series). Center toggles Calendar ↔ Workspace.
 - **Module 4 — reconcile** (GUI). Each day splits into `plan | actual` lanes.
-  Double-click a block to set status (Planned/Done/Skipped) and actual times;
-  the actual span renders green in the right lane, so plan vs. outcome sit side
-  by side. (Guided evening-review walk still to come.)
+  Double-click a block to set status (Planned/Done/Skipped/Carried) and actual
+  times; the actual span renders green in the right lane, so plan vs. outcome
+  sit side by side. **Carry over** clones an unfinished block onto a chosen day
+  (default tomorrow), leaving the original marked `carried`. The calendar's
+  **Review today** button runs a guided evening walk through the day's
+  still-unreconciled blocks, one at a time.
 - **Module 5 — rollups** (GUI). Workspace **Time** tab: per-project planned vs.
   actual, this-week vs. all-time, optionally recursing sub-projects — the
   inverse of the calendar (where time goes, per project).
