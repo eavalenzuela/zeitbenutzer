@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 400" width="480" height="400">
+  <title>zeitbenutzer mark · monochrome</title>
+  <desc>All-black variant for surfaces where the accent green is not appropriate.</desc>
+
+  <path d="M 200 40 A 160 160 0 0 0 200 360 Z" fill="#111111"></path>
+
+  <g stroke="#f6f3ec" stroke-width="3.2" stroke-linecap="round" fill="none">
+    <line x1="200" y1="40" x2="200" y2="58"></line>
+    <line x1="120" y1="61.43" x2="125" y2="70.09"></line>
+    <line x1="61.44" y1="120" x2="70.10" y2="125"></line>
+    <line x1="40" y1="200" x2="58" y2="200"></line>
+    <line x1="61.44" y1="280" x2="70.10" y2="275"></line>
+    <line x1="120" y1="338.57" x2="125" y2="329.91"></line>
+    <line x1="200" y1="360" x2="200" y2="342"></line>
+  </g>
+
+  <g stroke="#f6f3ec" stroke-width="4.7" stroke-linecap="round" fill="none">
+    <line x1="200" y1="200" x2="108.55" y2="147.20"></line>
+    <line x1="200" y1="200" x2="141.80" y2="233.60"></line>
+  </g>
+  <circle cx="200" cy="200" r="4" fill="#f6f3ec"></circle>
+
+  <g stroke="#111111" stroke-width="3.2" stroke-linecap="round" fill="none">
+    <line x1="200" y1="40" x2="460" y2="40"></line>
+    <line x1="200" y1="61.43" x2="460" y2="61.43"></line>
+    <line x1="200" y1="120" x2="460" y2="120"></line>
+    <line x1="200" y1="200" x2="460" y2="200"></line>
+    <line x1="200" y1="280" x2="460" y2="280"></line>
+    <line x1="200" y1="338.57" x2="460" y2="338.57"></line>
+    <line x1="200" y1="360" x2="460" y2="360"></line>
+  </g>
+
+  <g stroke="#111111" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round" fill="none">
+    <rect x="428" y="79.72" width="22" height="22" rx="2" ry="2"></rect>
+    <rect x="428" y="149" width="22" height="22" rx="2" ry="2"></rect>
+    <rect x="428" y="229" width="22" height="22" rx="2" ry="2"></rect>
+    <rect x="428" y="298.28" width="22" height="22" rx="2" ry="2"></rect>
+  </g>
+
+  
+  <polyline points="431.96,91.82 437.46,96.88 447.36,84.56" fill="none" stroke="#111111" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"></polyline>
+</svg>

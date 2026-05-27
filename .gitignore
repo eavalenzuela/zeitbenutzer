@@ -2,3 +2,7 @@ build/
 build-*/
 *.o
 *.a
+
+# Built installer artifacts (produced by cpack; the recipe is tracked, not the output)
+installers/*.deb
+installers/*.pkg

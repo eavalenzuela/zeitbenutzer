@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 400" width="480" height="400">
+  <title>zeitbenutzer mark · mini</title>
+  <desc>Reduced glyph for use at favicon scale (≤28px). Three ticks, three rules, one check.</desc>
+
+  
+  <path d="M 200 40 A 160 160 0 0 0 200 360 Z" fill="#111111"></path>
+
+  
+  <g stroke="#f6f3ec" stroke-width="6" stroke-linecap="round" fill="none">
+    <line x1="200" y1="40" x2="200" y2="64"></line>
+    <line x1="40" y1="200" x2="64" y2="200"></line>
+    <line x1="200" y1="360" x2="200" y2="336"></line>
+  </g>
+
+  
+  <g stroke="#f6f3ec" stroke-width="10" stroke-linecap="round" fill="none">
+    <line x1="200" y1="200" x2="108.55" y2="147.20"></line>
+    <line x1="200" y1="200" x2="141.80" y2="233.60"></line>
+  </g>
+  <circle cx="200" cy="200" r="8" fill="#f6f3ec"></circle>
+
+  
+  <g stroke="#111111" stroke-width="9" stroke-linecap="round" fill="none">
+    <line x1="200" y1="40" x2="460" y2="40"></line>
+    <line x1="200" y1="200" x2="460" y2="200"></line>
+    <line x1="200" y1="360" x2="460" y2="360"></line>
+  </g>
+
+  
+  <polyline points="320,170 360,210 440,120" fill="none" stroke="oklch(0.68 0.18 145)" stroke-width="14" stroke-linecap="round" stroke-linejoin="round"></polyline>
+</svg>

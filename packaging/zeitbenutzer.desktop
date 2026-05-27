@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=zeitbenutzer
+GenericName=Time & Project Planner
+Comment=Plan your time in blocks, reconcile what happened, see time per project
+Exec=zeitbenutzer
+Icon=zeitbenutzer
+Terminal=false
+Categories=Office;Calendar;ProjectManagement;
+Keywords=time;calendar;planning;notes;tasks;reconcile;
+StartupNotify=true
+StartupWMClass=zeitbenutzer
