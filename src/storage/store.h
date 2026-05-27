@@ -86,6 +86,27 @@ public:
     QList<Occurrence> occurrencesInRange(const QDateTime& winStart,
                                          const QDateTime& winEnd);
 
+    // --- external calendars (module 6) ---------------------------------------
+    Id                   createExternalSource(const ExternalSource& s);
+    QList<ExternalSource> listExternalSources();
+    void                 updateExternalSource(const ExternalSource& s);
+    void                 deleteExternalSource(Id sourceId);
+    void                 setSourceSynced(Id sourceId, const QDateTime& when);
+
+    // Replace a source's cached events wholesale (the re-sync step), preserving
+    // any adoption: a new event whose uid matches a previously-adopted one keeps
+    // its adopted_block_id so the overlay copy stays suppressed.
+    void replaceSourceEvents(Id sourceId, const QList<ExternalEvent>& events);
+
+    // External events overlapping [winStart,winEnd]. Joined to their source for
+    // color. Events already adopted into a block are omitted (the block now
+    // represents them on the grid). Deliberately separate from occurrencesInRange
+    // so external calendars never count toward reconcile or rollups.
+    QList<ExternalEvent> externalEventsInRange(const QDateTime& winStart,
+                                               const QDateTime& winEnd);
+    // Link an external event to the block it was adopted into.
+    void markEventAdopted(Id eventId, Id blockId);
+
     // --- rollups -------------------------------------------------------------
     // Minutes of planned / actual time attributed to a project (optionally
     // including descendant projects) within an optional window. Pass invalid

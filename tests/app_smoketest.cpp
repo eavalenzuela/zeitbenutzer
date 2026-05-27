@@ -4,10 +4,13 @@
 // a construction/wiring smoke, not a pixel test.
 
 #include <QApplication>
+#include <QDir>
+#include <QFile>
 #include <QTextStream>
 
 #include "app/calendar_view.h"
 #include "app/day_review_dialog.h"
+#include "app/external_sync.h"
 #include "app/main_window.h"
 #include "app/reconcile_panel.h"
 #include "app/note_list_panel.h"
@@ -175,6 +178,45 @@ int main(int argc, char** argv)
         DayReviewDialog review(store, queue);
         app.processEvents();
         check("review dialog constructs headless", true);
+    }
+
+    // External calendars: sync a local .ics file source through ExternalSync.
+    {
+        const QByteArray stamp =
+            QDate::currentDate().toString(QStringLiteral("yyyyMMdd")).toUtf8();
+        const QByteArray ics =
+            "BEGIN:VCALENDAR\r\nVERSION:2.0\r\n"
+            "BEGIN:VEVENT\r\nUID:sync-1\r\nSUMMARY:Imported event\r\n"
+            "DTSTART:" + stamp + "T130000Z\r\n"
+            "DTEND:" + stamp + "T140000Z\r\n"
+            "END:VEVENT\r\nEND:VCALENDAR\r\n";
+        const QString path =
+            QDir(QDir::tempPath()).filePath(QStringLiteral("zb_sync_test.ics"));
+        QFile f(path);
+        f.open(QIODevice::WriteOnly);
+        f.write(ics);
+        f.close();
+
+        ExternalSource src;
+        src.kind = ExternalSource::Kind::File;
+        src.location = path;
+        src.name = QStringLiteral("Local ICS");
+        store.createExternalSource(src);
+
+        ExternalSync sync(store);
+        int refreshes = 0;
+        QObject::connect(&sync, &ExternalSync::refreshed,
+                         [&] { ++refreshes; });
+        sync.refreshAll();
+        app.processEvents();
+        check("file-source sync emits refreshed", refreshes >= 1);
+
+        const QDate today = QDate::currentDate();
+        const QDateTime ws(today.addDays(-1), QTime(0, 0));
+        const QDateTime we(today.addDays(1), QTime(23, 59, 59));
+        check("synced event is cached and queryable",
+              store.externalEventsInRange(ws, we).size() == 1);
+        QFile::remove(path);
     }
 
     // Themes + project colors.

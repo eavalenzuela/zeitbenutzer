@@ -2,7 +2,9 @@
 
 #include "storage/recurrence.h"
 
+#include <QHash>
 #include <QSet>
+#include <QSqlDatabase>
 #include <QSqlQuery>
 #include <QTimeZone>
 #include <algorithm>
@@ -686,6 +688,169 @@ QList<Occurrence> Store::occurrencesInRange(const QDateTime& winStart,
         return a.plannedStart < b.plannedStart;
     });
     return out;
+}
+
+// ---- external calendars -----------------------------------------------------
+
+namespace {
+
+ExternalSource readSource(const QSqlQuery& q)
+{
+    ExternalSource s;
+    s.id        = q.value(0).toLongLong();
+    s.kind      = static_cast<ExternalSource::Kind>(q.value(1).toInt());
+    s.location  = q.value(2).toString();
+    s.name      = q.value(3).toString();
+    s.color     = q.value(4).toString();
+    s.enabled   = q.value(5).toInt() != 0;
+    s.lastSynced = optFromEpoch(q.value(6));
+    return s;
+}
+
+} // namespace
+
+Id Store::createExternalSource(const ExternalSource& s)
+{
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral(
+        "INSERT INTO external_source(kind, location, name, color, enabled) "
+        "VALUES(?,?,?,?,?)"));
+    q.addBindValue(static_cast<int>(s.kind));
+    q.addBindValue(txt(s.location));
+    q.addBindValue(txt(s.name));
+    q.addBindValue(txt(s.color));
+    q.addBindValue(s.enabled ? 1 : 0);
+    q.exec();
+    return q.lastInsertId().toLongLong();
+}
+
+QList<ExternalSource> Store::listExternalSources()
+{
+    QList<ExternalSource> out;
+    QSqlQuery q(m_db.handle());
+    q.exec(QStringLiteral(
+        "SELECT id, kind, location, name, color, enabled, last_synced "
+        "FROM external_source ORDER BY id"));
+    while (q.next())
+        out.append(readSource(q));
+    return out;
+}
+
+void Store::updateExternalSource(const ExternalSource& s)
+{
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral(
+        "UPDATE external_source SET kind=?, location=?, name=?, color=?, "
+        "enabled=? WHERE id=?"));
+    q.addBindValue(static_cast<int>(s.kind));
+    q.addBindValue(txt(s.location));
+    q.addBindValue(txt(s.name));
+    q.addBindValue(txt(s.color));
+    q.addBindValue(s.enabled ? 1 : 0);
+    q.addBindValue(s.id);
+    q.exec();
+}
+
+void Store::deleteExternalSource(Id sourceId)
+{
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral("DELETE FROM external_source WHERE id = ?"));
+    q.addBindValue(sourceId);
+    q.exec();
+}
+
+void Store::setSourceSynced(Id sourceId, const QDateTime& when)
+{
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral(
+        "UPDATE external_source SET last_synced = ? WHERE id = ?"));
+    q.addBindValue(toEpoch(when));
+    q.addBindValue(sourceId);
+    q.exec();
+}
+
+void Store::replaceSourceEvents(Id sourceId, const QList<ExternalEvent>& events)
+{
+    QSqlDatabase db = m_db.handle();
+    db.transaction();
+
+    // Remember which uids were adopted so re-sync doesn't lose the link.
+    QHash<QString, Id> adopted;
+    {
+        QSqlQuery q(db);
+        q.prepare(QStringLiteral(
+            "SELECT uid, adopted_block_id FROM external_event "
+            "WHERE source_id = ? AND adopted_block_id IS NOT NULL"));
+        q.addBindValue(sourceId);
+        q.exec();
+        while (q.next())
+            adopted.insert(q.value(0).toString(), q.value(1).toLongLong());
+    }
+
+    QSqlQuery del(db);
+    del.prepare(QStringLiteral("DELETE FROM external_event WHERE source_id = ?"));
+    del.addBindValue(sourceId);
+    del.exec();
+
+    QSqlQuery ins(db);
+    ins.prepare(QStringLiteral(
+        "INSERT INTO external_event(source_id, uid, summary, location_txt, "
+        "start_utc, end_utc, all_day, adopted_block_id) VALUES(?,?,?,?,?,?,?,?)"));
+    for (const ExternalEvent& e : events) {
+        ins.addBindValue(sourceId);
+        ins.addBindValue(txt(e.uid));
+        ins.addBindValue(txt(e.summary));
+        ins.addBindValue(txt(e.location));
+        ins.addBindValue(toEpoch(e.start));
+        ins.addBindValue(toEpoch(e.end));
+        ins.addBindValue(e.allDay ? 1 : 0);
+        const auto it = adopted.constFind(e.uid);
+        ins.addBindValue(it != adopted.constEnd() ? QVariant(*it) : QVariant());
+        ins.exec();
+    }
+    db.commit();
+}
+
+QList<ExternalEvent> Store::externalEventsInRange(const QDateTime& winStart,
+                                                  const QDateTime& winEnd)
+{
+    QList<ExternalEvent> out;
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral(
+        "SELECT e.id, e.source_id, e.uid, e.summary, e.location_txt, "
+        "e.start_utc, e.end_utc, e.all_day, e.adopted_block_id, s.color "
+        "FROM external_event e JOIN external_source s ON s.id = e.source_id "
+        "WHERE s.enabled = 1 AND e.adopted_block_id IS NULL "
+        "AND e.start_utc <= ? AND e.end_utc >= ? "
+        "ORDER BY e.start_utc"));
+    q.addBindValue(toEpoch(winEnd));
+    q.addBindValue(toEpoch(winStart));
+    q.exec();
+    while (q.next()) {
+        ExternalEvent e;
+        e.id          = q.value(0).toLongLong();
+        e.sourceId    = q.value(1).toLongLong();
+        e.uid         = q.value(2).toString();
+        e.summary     = q.value(3).toString();
+        e.location    = q.value(4).toString();
+        e.start       = fromEpoch(q.value(5));
+        e.end         = fromEpoch(q.value(6));
+        e.allDay      = q.value(7).toInt() != 0;
+        e.adoptedBlockId = toOptId(q.value(8));
+        e.sourceColor = q.value(9).toString();
+        out.append(e);
+    }
+    return out;
+}
+
+void Store::markEventAdopted(Id eventId, Id blockId)
+{
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral(
+        "UPDATE external_event SET adopted_block_id = ? WHERE id = ?"));
+    q.addBindValue(blockId);
+    q.addBindValue(eventId);
+    q.exec();
 }
 
 // ---- rollups ----------------------------------------------------------------

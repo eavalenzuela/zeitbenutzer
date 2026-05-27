@@ -17,12 +17,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)   # compile .qrc (bundled fonts) automatically
 
-find_package(Qt6 REQUIRED COMPONENTS Core Sql Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Sql Widgets Network)
 
 # --- storage: schema, migrations, entity stores, recurrence expansion --------
 add_library(zb-storage STATIC
     src/storage/database.cpp
     src/storage/recurrence.cpp
+    src/storage/ical.cpp
     src/storage/store.cpp
 )
 target_include_directories(zb-storage PUBLIC src)
@@ -45,8 +46,9 @@ add_library(zb-app STATIC
     src/app/theme.cpp
     src/app/settings.cpp
     src/app/settings_dialog.cpp
+    src/app/external_sync.cpp
 )
-target_link_libraries(zb-app PUBLIC zb-storage Qt6::Widgets)
+target_link_libraries(zb-app PUBLIC zb-storage Qt6::Widgets Qt6::Network)
 
 # Bundled fonts (assets/fonts.qrc). Qt resources in a *static* library are not
 # reliably auto-initialized, so the .qrc is compiled into each executable that
