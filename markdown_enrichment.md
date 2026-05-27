@@ -144,9 +144,22 @@ to fix Qt's lossy per-line `<pre>` serialization, and styled blockquotes.
 `<pre>`, indentation kept, themed keyword color, unknown-lang verbatim,
 unterminated-fence safe, quote bar+tint).
 
-### Phase 4 — CSV/TSV tables (custom flavor) → see Deep Dive A
+### Phase 4 — CSV/TSV tables (custom flavor) → see Deep Dive A ✅
 **Goal:** `:::csv … :::` (and `:::tsv`) fenced blocks render as `<table>`.
-**Scope:** medium; lives entirely in the segmentation + a table-HTML emitter.
+- **Segmentation:** `extractTables` lifts `:::csv`/`:::tsv` blocks to placeholders
+  (run *after* code extraction so a fence inside code is protected); unterminated
+  → left as text. `spliceTables` swaps placeholders positionally.
+- **Renderer** (`markdown_table.{h,cpp}`): `renderCsvTable` parses the info-line
+  (`noheader`, `delim=X`, then caption), splits rows with RFC-4180 quoting
+  (`""` escape, no multi-line), trims unquoted cells, runs inline markdown per
+  cell (via Qt, inner-`<p>` extraction — shareable with Phase 6), pads ragged
+  rows to the widest, auto-right-aligns all-numeric columns, and emits a
+  Qt-subset `<table border>` with `<caption>`, themed `<th>` bg + `<td>`.
+- **Verified at render level:** Qt builds a real `QTextTable` from the HTML (not
+  just string checks this time).
+**Done:** segmentation + `markdown_table` + smoke checks (caption/header, quoted
+delimiter kept, numeric right-align, real QTextTable, noheader, delim override,
+ragged padding, unterminated-safe).
 
 ### Phase 5 — Images → see Deep Dive B
 **Goal:** embedded images render; storage backend selectable; orphans collectible.
@@ -343,7 +356,7 @@ cheat-sheet** of the supported markdown syntax. Decided 2026-05-27.
       through `MarkdownRenderer::toHtml`; Qt-engine standard render; smoke-tested)
 - [x] Phase 2 — checkboxes (Qt renders task lists; postProcess swaps ☒→☑; tested)
 - [x] Phase 3 — syntax highlighting + code-block takeover + blockquote styling (tested)
-- [ ] Phase 4 — CSV/TSV tables
+- [x] Phase 4 — CSV/TSV tables (segmentation + markdown_table; real QTextTable; tested)
 - [ ] Phase 5 — images
 - [ ] Phase 6 — wikilinks + completion
 - [ ] Cross-cutting — in-editor syntax help panel (deferred; content grows per phase)

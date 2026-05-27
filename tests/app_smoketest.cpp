@@ -7,8 +7,10 @@
 #include <QDir>
 #include <QFile>
 #include <QTextBlock>
+#include <QTextCursor>
 #include <QTextDocument>
 #include <QTextStream>
+#include <QTextTable>
 
 #include "app/adopt_dialog.h"
 #include "app/calendar_sources_dialog.h"
@@ -339,6 +341,38 @@ int main(int argc, char** argv)
         check("blockquote gets a bar glyph and a background tint",
               quote.contains(QString::fromUtf8("▎"))
                   && quote.contains(QStringLiteral("background-color")));
+
+        // Phase 4 — :::csv/:::tsv tables.
+        const QString tbl = MarkdownRenderer::toHtml(QStringLiteral(
+            ":::csv Cap\nName,Count\n\"a, b\",3\nx,12\n:::\n"));
+        check("table renders <table> with header and caption",
+              tbl.contains(QStringLiteral("<table")) && tbl.contains(QStringLiteral("<th"))
+                  && tbl.contains(QStringLiteral("Cap")));
+        check("quoted cell keeps the delimiter inside it",
+              tbl.contains(QStringLiteral(">a, b<")));
+        check("numeric column is right-aligned",
+              tbl.contains(QStringLiteral("text-align:right")));
+        // Render-level: Qt actually builds a QTextTable from our HTML.
+        QTextDocument tdoc2;
+        tdoc2.setHtml(tbl);
+        bool hasTable = false;
+        for (QTextBlock b = tdoc2.begin(); b != tdoc2.end(); b = b.next()) {
+            if (QTextCursor(b).currentTable()) { hasTable = true; break; }
+        }
+        check("Qt renders the table as a real QTextTable", hasTable);
+        check("noheader yields no header cells",
+              !MarkdownRenderer::toHtml(QStringLiteral(":::csv noheader\na,b\n:::\n"))
+                   .contains(QStringLiteral("<th")));
+        const QString semi = MarkdownRenderer::toHtml(
+            QStringLiteral(":::csv delim=;\nh1;h2\nx;y\n:::\n"));
+        check("delim override splits on the chosen character",
+              semi.count(QStringLiteral("<th ")) == 2 && semi.count(QStringLiteral("<td ")) == 2);
+        check("ragged rows are padded to the widest row",
+              MarkdownRenderer::toHtml(QStringLiteral(":::csv noheader\na,b,c\nx\n:::\n"))
+                  .count(QStringLiteral("<td ")) == 6); // 2 rows × 3 cols
+        check("unterminated table fence is not rendered as a table",
+              !MarkdownRenderer::toHtml(QStringLiteral(":::csv\na,b\n"))
+                   .contains(QStringLiteral("<table")));
     }
 
     // Themes + project colors.

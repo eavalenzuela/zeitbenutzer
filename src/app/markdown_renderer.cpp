@@ -1,6 +1,7 @@
 #include "app/markdown_renderer.h"
 
 #include "app/code_highlight.h"
+#include "app/markdown_table.h"
 #include "app/theme.h"
 #include "app/typography.h"
 
@@ -155,6 +156,101 @@ QString spliceCodeBlocks(QString html, const QVector<CodeSeg>& segs, const Theme
     return html;
 }
 
+// A :::csv / :::tsv table block lifted out before the standard markdown pass.
+struct TableSeg {
+    QString info;  // text after the fence tag (options + caption)
+    QChar   delim; // ',' for csv, '\t' for tsv (info may override)
+    QString body;  // raw row lines, newline-joined
+};
+
+QString placeholderTable(int k)
+{
+    return QStringLiteral("ZBTABLE%1").arg(k);
+}
+
+// Does this line open a :::csv/:::tsv block? (≤3 leading spaces; the tag must be
+// followed by a space or end-of-line so ":::csvfoo" isn't mistaken for one.)
+bool tableOpen(const QString& line, QChar* delim, QString* info)
+{
+    int lead = 0;
+    while (lead < line.size() && lead < 3 && line[lead] == QLatin1Char(' '))
+        ++lead;
+    const QStringView v = QStringView(line).mid(lead);
+    const auto match = [&](QStringView tag, QChar d) {
+        if (!v.startsWith(tag))
+            return false;
+        if (v.size() > tag.size() && !v.at(tag.size()).isSpace())
+            return false;
+        *delim = d;
+        *info = v.mid(tag.size()).toString().trimmed();
+        return true;
+    };
+    return match(QStringLiteral(":::csv"), QLatin1Char(','))
+        || match(QStringLiteral(":::tsv"), QLatin1Char('\t'));
+}
+
+// A closing fence is a line that is exactly ":::" (≤3 leading spaces).
+bool tableClose(const QString& line)
+{
+    int lead = 0;
+    while (lead < line.size() && lead < 3 && line[lead] == QLatin1Char(' '))
+        ++lead;
+    return QStringView(line).mid(lead).trimmed() == QStringView(u":::");
+}
+
+// Phase 4 segmentation — pull :::csv/:::tsv blocks out (run after code blocks so
+// a fence inside a code block is already protected). Unterminated → left as text.
+QString extractTables(const QString& md, QVector<TableSeg>& segs)
+{
+    const QStringList lines = md.split(QLatin1Char('\n'));
+    const int n = lines.size();
+    QStringList out;
+    int i = 0;
+    while (i < n) {
+        QChar delim;
+        QString info;
+        if (tableOpen(lines[i], &delim, &info)) {
+            int close = -1;
+            for (int j = i + 1; j < n; ++j)
+                if (tableClose(lines[j])) { close = j; break; }
+            if (close >= 0) {
+                TableSeg t;
+                t.delim = delim;
+                t.info = info;
+                QStringList body;
+                for (int b = i + 1; b < close; ++b)
+                    body << lines[b];
+                t.body = body.join(QLatin1Char('\n'));
+                out << QString() << placeholderTable(segs.size()) << QString();
+                segs.push_back(t);
+                i = close + 1;
+                continue;
+            }
+            // Unterminated: fall through, treat the open line as ordinary text.
+        }
+        out << lines[i];
+        ++i;
+    }
+    return out.join(QLatin1Char('\n'));
+}
+
+// Substitute each table placeholder with its rendered <table> (positionally, so
+// generated HTML is never reinterpreted as regex backrefs).
+QString spliceTables(QString html, const QVector<TableSeg>& segs, const Theme& th)
+{
+    for (int k = 0; k < segs.size(); ++k) {
+        const QRegularExpression re(
+            QStringLiteral("<p[^>]*>%1</p>").arg(placeholderTable(k)));
+        const QRegularExpressionMatch m = re.match(html);
+        if (!m.hasMatch())
+            continue;
+        const QString tbl =
+            renderCsvTable(segs[k].info, segs[k].delim, segs[k].body, th);
+        html.replace(m.capturedStart(), m.capturedLength(), tbl);
+    }
+    return html;
+}
+
 // Phase 3 — blockquote styling. Qt renders a blockquote as a plain <p> with a
 // symmetric 40px margin and no <blockquote> element, and its rich-text engine
 // ignores CSS borders on paragraphs. So instead of a real left border we give
@@ -190,10 +286,17 @@ QString MarkdownRenderer::toHtml(const QString& markdown, const RenderContext& c
     // the first custom segment (Phase 3); the theme drives syntax + quote colors
     // and is pulled live so the editor's theme switch re-renders correctly.
     const Theme& th = currentTheme();
-    QVector<CodeSeg> segs;
-    const QString prepared = applyHardBreaks(extractCodeBlocks(markdown, segs));
+    // Extract verbatim/custom blocks before the standard pass: code first (most
+    // sacred), then tables; hard-wrap runs last on the remaining prose.
+    QVector<CodeSeg> codeSegs;
+    QVector<TableSeg> tableSegs;
+    QString prepared = extractCodeBlocks(markdown, codeSegs);
+    prepared = extractTables(prepared, tableSegs);
+    prepared = applyHardBreaks(prepared);
+
     QString html = renderStandardMarkdown(prepared);
-    html = spliceCodeBlocks(std::move(html), segs, th);
+    html = spliceCodeBlocks(std::move(html), codeSegs, th);
+    html = spliceTables(std::move(html), tableSegs, th);
     html = postProcess(std::move(html), ctx, th);
     return html;
 }
