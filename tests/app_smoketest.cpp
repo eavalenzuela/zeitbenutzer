@@ -9,6 +9,7 @@
 #include <QTextStream>
 
 #include "app/adopt_dialog.h"
+#include "app/calendar_sources_dialog.h"
 #include "app/calendar_view.h"
 #include "app/day_review_dialog.h"
 #include "app/external_sync.h"
@@ -232,6 +233,19 @@ int main(int argc, char** argv)
         AdoptDialog adopt(store, QStringLiteral("All-day import"));
         app.processEvents();
         check("adopt dialog constructs headless", true);
+
+        // Sources management dialogs construct headless and round-trip a source.
+        CalendarSourcesDialog sources(store, sync);
+        SourceEditDialog editor;
+        ExternalSource probe;
+        probe.name = QStringLiteral("My feed");
+        probe.location = QStringLiteral("https://example.test/x.ics");
+        probe.kind = ExternalSource::Kind::Url;
+        editor.setSource(probe);
+        app.processEvents();
+        check("source editor round-trips its fields",
+              editor.source().name == QStringLiteral("My feed")
+                  && editor.source().kind == ExternalSource::Kind::Url);
         QFile::remove(path);
     }
 

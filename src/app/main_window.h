@@ -13,6 +13,7 @@ class TaskListPanel;
 class TimeRollupPanel;
 class NoteEditor;
 class CalendarView;
+class ExternalSync;
 
 class MainWindow : public QMainWindow {
     Q_OBJECT
@@ -37,6 +38,7 @@ private:
     TimeRollupPanel*  m_time;
     NoteEditor*       m_editor;
     CalendarView*     m_calendar;
+    ExternalSync*     m_sync;
 };
 
 } // namespace zb

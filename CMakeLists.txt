@@ -48,6 +48,7 @@ add_library(zb-app STATIC
     src/app/settings_dialog.cpp
     src/app/external_sync.cpp
     src/app/adopt_dialog.cpp
+    src/app/calendar_sources_dialog.cpp
 )
 target_link_libraries(zb-app PUBLIC zb-storage Qt6::Widgets Qt6::Network)
 
