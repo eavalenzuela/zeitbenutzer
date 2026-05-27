@@ -34,8 +34,17 @@ organizes them temporally. See [`DESIGN.md`](./DESIGN.md) for the full design.
 - **Module 5 — rollups** (GUI). Workspace **Time** tab: per-project planned vs.
   actual, this-week vs. all-time, optionally recursing sub-projects — the
   inverse of the calendar (where time goes, per project).
+- **Module 6 — external calendars** (GUI). Read-only overlay of outside
+  calendars on the week grid. Add sources via **App → Calendars…**: a local
+  `.ics` file or an **ICS URL** — which covers Google / iCloud / Outlook via
+  their "secret iCal address", so no OAuth is needed. All-day events stack in a
+  band above the grid; timed events render faint behind your blocks. They never
+  count toward reconcile or rollups. **Right-click → Adopt into block…** pulls
+  one into a real, trackable block. Sources refresh on launch and via **Refresh
+  now**; failures surface (status bar / dialog) rather than failing silently.
 
-The core build plan (modules 0–5) is complete.
+The core build plan (modules 0–5) is complete, plus module 6 (external
+calendars).
 
 **Settings** (App → Settings…): light/dark **theme**, week-start day (Mon/Sun),
 and calendar snap interval (15/30 min), persisted to `settings.ini` in the
@@ -52,14 +61,18 @@ Calendar niceties: a red **current-time line** on today's column, and a
 
 ## Stack
 
-- **Qt6 / C++20** (Core, Sql, Widgets), CMake. Target: **macOS + Linux**.
+- **Qt6 / C++20** (Core, Sql, Widgets, Network), CMake. Target: **macOS +
+  Linux**.
 - **SQLite** via Qt's bundled `QSQLITE` driver (`Qt6::Sql`) — no extra deps.
+- **iCalendar** reading is a small dependency-free parser (`storage/ical`); ICS
+  feeds are fetched with `Qt6::Network`. No third-party libraries.
 - **Bundled fonts** (OFL 1.1, embedded as Qt resources): Source Code Pro
   (editor) + Source Sans 3 (UI/preview), so rendering is identical everywhere.
 
 ## Build & test
 
-Prerequisites: a C++20 compiler, CMake ≥ 3.21, and Qt6 (`Core`, `Sql`).
+Prerequisites: a C++20 compiler, CMake ≥ 3.21, and Qt6 (`Core`, `Sql`,
+`Widgets`, `Network`).
 
 ```bash
 cmake -S . -B build
@@ -76,7 +89,8 @@ ctest --test-dir build --output-on-failure   # runs storage_smoketest
 │   ├── types.h            # entity structs mirroring the schema
 │   ├── database.{h,cpp}   # connection + migrations
 │   ├── recurrence.{h,cpp} # RRULE subset: parse / serialize / expand
-│   └── store.{h,cpp}      # CRUD, lazy occurrence materialization, rollups
+│   ├── ical.{h,cpp}       # module 6: iCalendar (RFC 5545) reader + expander
+│   └── store.{h,cpp}      # CRUD, materialization, rollups, external events
 ├── src/app/               # module 1: GUI shell + panels
 │   ├── main.cpp           # opens DB at app-data dir, shows MainWindow
 │   ├── main_window.{h,cpp}        # three-pane shell, wiring
@@ -89,4 +103,5 @@ ctest --test-dir build --output-on-failure   # runs storage_smoketest
 ## Build plan
 
 0. **storage** (this) → 1. projects+notes → 2. tasks → 3. calendar+recurrence
-   (GUI) → 4. reconcile → 5. rollups view. See `DESIGN.md`.
+   (GUI) → 4. reconcile → 5. rollups view → 6. external calendars. See
+   `DESIGN.md`.

@@ -1,6 +1,7 @@
 #include "app/calendar_view.h"
 
 #include "app/block_dialog.h"
+#include "app/adopt_dialog.h"
 #include "app/block_edit_dialog.h"
 #include "app/day_review_dialog.h"
 #include "app/reconcile_panel.h"
@@ -9,9 +10,12 @@
 #include "storage/recurrence.h"
 #include "storage/store.h"
 
+#include <QAction>
+#include <QContextMenuEvent>
 #include <QGraphicsScene>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QMenu>
 #include <QMessageBox>
 #include <QMouseEvent>
 #include <QPainter>
@@ -62,19 +66,43 @@ void CalGrid::reload()
     for (const Project& p : m_store.listProjects(true))
         m_projectColors.insert(p.id, projectColor(p.color, p.id));
 
+    // External read-only overlay: split into per-day all-day buckets (band) and
+    // timed events (drawn behind blocks in the planned lane). The band height
+    // grows with the busiest day, so the time grid shifts down only as needed.
+    m_external = m_store.externalEventsInRange(start, end);
+    m_allDayByDay.assign(7, {});
+    for (int i = 0; i < m_external.size(); ++i) {
+        const ExternalEvent& e = m_external.at(i);
+        if (!e.allDay)
+            continue;
+        // An all-day event can span several days; mark each in-view day.
+        QDate d = e.start.date();
+        const QDate last = e.end.addSecs(-1).date(); // DTEND is exclusive
+        for (; d <= last; d = d.addDays(1)) {
+            const int day = static_cast<int>(m_weekStart.daysTo(d));
+            if (day >= 0 && day < 7)
+                m_allDayByDay[day].append(i);
+        }
+    }
+    int maxRows = 0;
+    for (const auto& day : m_allDayByDay)
+        maxRows = std::max<int>(maxRows, day.size());
+    maxRows = std::min(maxRows, kMaxAllDayRows);
+    m_allDayBandH = maxRows > 0 ? maxRows * kAllDayRowH + 2 * kAllDayPad : 0.0;
+
     viewport()->update();
 }
 
 // --- layout -----------------------------------------------------------------
 
 double CalGrid::dayWidth() const { return (viewport()->width() - kGutter) / 7.0; }
-double CalGrid::ppm() const { return (viewport()->height() - kHeader) / (24.0 * 60.0); }
+double CalGrid::ppm() const { return (viewport()->height() - gridTop()) / (24.0 * 60.0); }
 double CalGrid::xForDay(int d) const { return kGutter + d * dayWidth(); }
 double CalGrid::xForLane(int d, Lane lane) const
 {
     return xForDay(d) + (lane == Lane::Actual ? laneWidth() : 0.0);
 }
-double CalGrid::yForMinutes(double m) const { return kHeader + m * ppm(); }
+double CalGrid::yForMinutes(double m) const { return gridTop() + m * ppm(); }
 int    CalGrid::dayAt(double x) const
 {
     if (x < kGutter)
@@ -83,7 +111,7 @@ int    CalGrid::dayAt(double x) const
 }
 double CalGrid::minutesAt(double y) const
 {
-    return clampd((y - kHeader) / ppm(), 0, 1440);
+    return clampd((y - gridTop()) / ppm(), 0, 1440);
 }
 double CalGrid::snap(double minutes) const { const double n = Settings::instance().snapMinutes(); return std::round(minutes / n) * n; }
 
@@ -143,6 +171,38 @@ int CalGrid::hitTest(const QPointF& pos, int* edge, Lane* lane) const
     return -1;
 }
 
+QRectF CalGrid::allDayPillRect(int day, int row) const
+{
+    const double x = xForDay(day) + 2.0;
+    const double y = kHeader + kAllDayPad + row * kAllDayRowH;
+    return QRectF(x, y, dayWidth() - 4.0, kAllDayRowH - 2.0);
+}
+
+int CalGrid::hitTestExternal(const QPointF& pos) const
+{
+    // All-day band first (it sits above the grid).
+    if (pos.y() < gridTop()) {
+        for (int day = 0; day < 7; ++day) {
+            const QList<int>& evs = m_allDayByDay.at(day);
+            const int shown = std::min<int>(evs.size(), kMaxAllDayRows);
+            for (int row = 0; row < shown; ++row)
+                if (allDayPillRect(day, row).contains(pos))
+                    return evs.at(row);
+        }
+        return -1;
+    }
+    // Timed externals live in the planned lane; topmost (last drawn) wins.
+    for (int i = m_external.size() - 1; i >= 0; --i) {
+        const ExternalEvent& e = m_external.at(i);
+        if (e.allDay)
+            continue;
+        const QRectF r = rectForSpan(e.start, e.end, Lane::Planned);
+        if (!r.isNull() && r.contains(pos))
+            return i;
+    }
+    return -1;
+}
+
 // --- painting ---------------------------------------------------------------
 
 void CalGrid::drawBackground(QPainter* p, const QRectF&)
@@ -185,7 +245,7 @@ void CalGrid::drawBackground(QPainter* p, const QRectF&)
         pen.setStyle(Qt::DotLine);
         p->setPen(pen);
         const double x = xForLane(d, Lane::Actual);
-        p->drawLine(QPointF(x, kHeader), QPointF(x, h));
+        p->drawLine(QPointF(x, gridTop()), QPointF(x, h));
     }
 
     // Vertical day separators + header band.
@@ -216,6 +276,41 @@ void CalGrid::drawBackground(QPainter* p, const QRectF&)
                     Qt::AlignCenter, QStringLiteral("actual"));
     }
 
+    // All-day band: read-only external events as muted, source-colored pills,
+    // capped per day with a "+N more" chip.
+    if (m_allDayBandH > 0.0) {
+        QFont bandFont = font();
+        bandFont.setPointSize(8);
+        p->setFont(bandFont);
+        p->setPen(th.subtleText);
+        p->drawText(QRectF(0, kHeader, kGutter - 6, kAllDayRowH),
+                    Qt::AlignRight | Qt::AlignVCenter, QStringLiteral("all-day"));
+        for (int d = 0; d < 7; ++d) {
+            const QList<int>& evs = m_allDayByDay.at(d);
+            const int shown = std::min<int>(evs.size(), kMaxAllDayRows);
+            for (int row = 0; row < shown; ++row) {
+                const bool overflow =
+                    (row == kMaxAllDayRows - 1 && evs.size() > kMaxAllDayRows);
+                const ExternalEvent& e = m_external.at(evs.at(row));
+                QColor c(e.sourceColor);
+                if (!c.isValid())
+                    c = th.subtleText;
+                const QRectF r = allDayPillRect(d, row);
+                p->setBrush(QColor(c.red(), c.green(), c.blue(), 50));
+                p->setPen(QPen(c, 1.0));
+                p->drawRoundedRect(r, 3, 3);
+                p->setPen(th.text);
+                const QString label =
+                    overflow ? QStringLiteral("+%1 more")
+                                   .arg(evs.size() - (kMaxAllDayRows - 1))
+                             : (e.summary.isEmpty() ? QStringLiteral("(event)")
+                                                    : e.summary);
+                p->drawText(r.adjusted(4, 0, -3, 0),
+                            Qt::AlignLeft | Qt::AlignVCenter, label);
+            }
+        }
+    }
+
     // Blocks: planned lane (left) + actual lane (right) per occurrence.
     QFont blockFont = font();
     blockFont.setPointSize(9);
@@ -232,6 +327,29 @@ void CalGrid::drawBackground(QPainter* p, const QRectF&)
         p->drawText(r.adjusted(4, 2, -3, -2),
                     Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap, label);
     };
+
+    // Timed external events: faint striped fill behind the blocks, in the
+    // planned lane — context to plan around, not commitments (no rollup/edit).
+    for (const ExternalEvent& e : m_external) {
+        if (e.allDay)
+            continue;
+        const QRectF r = rectForSpan(e.start, e.end, Lane::Planned);
+        if (r.isNull())
+            continue;
+        QColor c(e.sourceColor);
+        if (!c.isValid())
+            c = th.subtleText;
+        QPen pen(c, 1.0);
+        pen.setStyle(Qt::DotLine);
+        p->setBrush(QBrush(QColor(c.red(), c.green(), c.blue(), 22),
+                           Qt::BDiagPattern));
+        p->setPen(pen);
+        p->drawRoundedRect(r, 4, 4);
+        p->setPen(th.subtleText);
+        p->drawText(r.adjusted(4, 2, -3, -2),
+                    Qt::AlignLeft | Qt::AlignTop | Qt::TextWordWrap,
+                    e.summary.isEmpty() ? QStringLiteral("(event)") : e.summary);
+    }
 
     for (int i = 0; i < m_occ.size(); ++i) {
         const Occurrence& o = m_occ.at(i);
@@ -337,7 +455,7 @@ void CalGrid::resizeEvent(QResizeEvent* e)
 void CalGrid::mousePressEvent(QMouseEvent* e)
 {
     const QPointF pos = mapToScene(e->pos());
-    if (e->button() != Qt::LeftButton || pos.x() < kGutter || pos.y() < kHeader) {
+    if (e->button() != Qt::LeftButton || pos.x() < kGutter || pos.y() < gridTop()) {
         QGraphicsView::mousePressEvent(e);
         return;
     }
@@ -560,6 +678,38 @@ void CalGrid::mouseDoubleClickEvent(QMouseEvent* e)
     emit weekChanged();
 }
 
+void CalGrid::contextMenuEvent(QContextMenuEvent* e)
+{
+    const QPointF pos = mapToScene(mapFromGlobal(e->globalPos()));
+    const int idx = hitTestExternal(pos);
+    if (idx < 0) {
+        QGraphicsView::contextMenuEvent(e);
+        return;
+    }
+    const ExternalEvent ev = m_external.at(idx);
+
+    QMenu menu(this);
+    QAction* adopt = menu.addAction(QStringLiteral("Adopt into block…"));
+    if (menu.exec(e->globalPos()) != adopt)
+        return;
+
+    AdoptDialog dlg(m_store, ev.summary, this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    Block b;
+    b.title = dlg.title();
+    b.projectId = dlg.projectId();
+    b.plannedStart = ev.start;
+    b.plannedEnd = ev.end;
+    b.status = BlockStatus::Planned;
+    const Id blockId = m_store.createBlock(b);
+    m_store.markEventAdopted(ev.id, blockId);
+
+    reload();
+    emit weekChanged();
+}
+
 // ===========================================================================
 //  CalendarView
 // ===========================================================================
@@ -605,6 +755,11 @@ void CalendarView::reload()
 }
 
 int CalendarView::occurrenceCount() const { return m_grid->occurrenceCount(); }
+
+double CalendarView::allDayBandHeight() const
+{
+    return m_grid->allDayBandHeight();
+}
 
 void CalendarView::applySettings()
 {

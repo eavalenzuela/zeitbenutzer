@@ -91,6 +91,40 @@ struct Block {
     std::optional<Id> carriedFrom;        // origin block this was carried from
 };
 
+// --- external calendars (module 6) ------------------------------------------
+
+// A configured read-only calendar feed: a local .ics file or a remote ICS URL
+// (incl. a provider's "secret iCal address" — covers Google/iCloud/Outlook
+// without OAuth).
+struct ExternalSource {
+    enum class Kind { File = 0, Url = 1 };
+
+    Id                id = -1;
+    Kind              kind = Kind::File;
+    QString           location;   // filesystem path or URL
+    QString           name;
+    QString           color;
+    bool              enabled = true;
+    std::optional<QDateTime> lastSynced;
+};
+
+// A cached, recurrence-expanded occurrence from an external source. Times are
+// concrete UTC instants. `allDay` events carry a date span (rendered in the
+// all-day band, not the time grid). `adoptedBlockId` is set once the user pulls
+// this event into a real Block; the overlay copy is then suppressed.
+struct ExternalEvent {
+    Id                id = -1;
+    Id                sourceId = -1;
+    QString           uid;
+    QString           summary;
+    QString           location;   // free-text location field from the VEVENT
+    QDateTime         start;      // UTC
+    QDateTime         end;        // UTC
+    bool              allDay = false;
+    std::optional<Id> adoptedBlockId;
+    QString           sourceColor; // joined from external_source for rendering
+};
+
 // A unified calendar entry for a window: either a persisted Block
 // (`materialized`) or a phantom occurrence expanded on the fly from a series.
 struct Occurrence {

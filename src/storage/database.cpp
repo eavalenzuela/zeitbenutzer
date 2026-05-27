@@ -15,7 +15,7 @@ QString nextConnectionName()
 }
 
 // Schema version this build expects. Bump + add a branch in migrate() to evolve.
-constexpr int kSchemaVersion = 1;
+constexpr int kSchemaVersion = 2;
 
 // Full v1 schema. Applied in one transaction when user_version == 0.
 const char* const kSchemaV1 = R"SQL(
@@ -107,6 +107,38 @@ CREATE INDEX idx_note_project  ON note(project_id);
 CREATE INDEX idx_task_project  ON task(project_id);
 )SQL";
 
+// v2: read-only external calendars (module 6). A `source` is a configured ICS
+// file or URL; `event` rows are its cached, recurrence-expanded occurrences.
+// External events never feed occurrencesInRange — they're a planning overlay,
+// not committed time. `adopted_block_id` links an event the user pulled into a
+// real, trackable block (so the overlay copy is then suppressed).
+const char* const kSchemaV2 = R"SQL(
+CREATE TABLE external_source (
+    id          INTEGER PRIMARY KEY,
+    kind        INTEGER NOT NULL,           -- 0 = file, 1 = url
+    location    TEXT    NOT NULL,           -- filesystem path or URL
+    name        TEXT    NOT NULL,
+    color       TEXT    NOT NULL DEFAULT '',
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    last_synced INTEGER
+);
+
+CREATE TABLE external_event (
+    id               INTEGER PRIMARY KEY,
+    source_id        INTEGER NOT NULL REFERENCES external_source(id) ON DELETE CASCADE,
+    uid              TEXT    NOT NULL,       -- VEVENT UID (+ instance suffix)
+    summary          TEXT    NOT NULL DEFAULT '',
+    location_txt     TEXT    NOT NULL DEFAULT '',
+    start_utc        INTEGER NOT NULL,
+    end_utc          INTEGER NOT NULL,
+    all_day          INTEGER NOT NULL DEFAULT 0,
+    adopted_block_id INTEGER REFERENCES block(id) ON DELETE SET NULL
+);
+
+CREATE INDEX idx_extevent_source ON external_event(source_id);
+CREATE INDEX idx_extevent_start  ON external_event(start_utc);
+)SQL";
+
 } // namespace
 
 Database::~Database()
@@ -177,18 +209,34 @@ bool Database::migrate(QString* error)
         return false;
     };
 
-    if (version < 1) {
-        // exec() of QSQLITE runs a single statement; split the bootstrap script.
+    // exec() of QSQLITE runs a single statement; split each bootstrap script.
+    const auto runScript = [&](const char* script, bool* ok) {
         const QStringList stmts =
-            QString::fromUtf8(kSchemaV1).split(QLatin1Char(';'), Qt::SkipEmptyParts);
+            QString::fromUtf8(script).split(QLatin1Char(';'), Qt::SkipEmptyParts);
         for (const QString& raw : stmts) {
             const QString sql = raw.trimmed();
             if (sql.isEmpty())
                 continue;
             QSqlQuery q(m_db);
-            if (!q.exec(sql))
-                return fail(q.lastError().text());
+            if (!q.exec(sql)) {
+                fail(q.lastError().text());
+                *ok = false;
+                return;
+            }
         }
+        *ok = true;
+    };
+
+    bool ok = true;
+    if (version < 1) {
+        runScript(kSchemaV1, &ok);
+        if (!ok)
+            return false;
+    }
+    if (version < 2) {
+        runScript(kSchemaV2, &ok);
+        if (!ok)
+            return false;
     }
 
     // PRAGMA user_version doesn't accept a bound parameter.

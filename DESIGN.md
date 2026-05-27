@@ -21,8 +21,10 @@ time points into.
 - **The schedule is structured data, not text.** A bidirectional plan/actual
   link graph does not belong in YAML frontmatter. SQLite owns the structure;
   markdown owns only prose.
-- **Local and self-contained.** No accounts, no external calendar sync in v1.
-  Your data is a single SQLite file you can back up.
+- **Local and self-contained.** No accounts and no write-back sync; your data
+  is a single SQLite file you can back up. External calendars are read-only —
+  pulled from an `.ics` file or ICS URL and overlaid, never edited or uploaded
+  (module 6).
 
 ## Scope
 
@@ -136,6 +138,18 @@ block(
 
 block_task(block_id, task_id)         -- a block schedules tasks (many-to-many)
 block_note(block_id, note_id)         -- a block references notes (many-to-many)
+
+-- Module 6: read-only external calendars (overlay, never in rollups).
+external_source(
+  id, kind,                           -- 0 = file, 1 = url
+  location,                           -- path or ICS URL (incl. secret iCal address)
+  name, color, enabled, last_synced NULL)
+
+external_event(                       -- cached, recurrence-expanded instances
+  id, source_id → external_source.id,
+  uid, summary, location_txt,
+  start_utc, end_utc, all_day BOOL,
+  adopted_block_id → block.id NULL)   -- set once adopted; overlay copy suppressed
 ```
 
 ### Design decisions baked into the schema
@@ -218,7 +232,8 @@ block_note(block_id, note_id)         -- a block references notes (many-to-many)
 | 3 | **calendar (plan)** | Day/week grid, create/move/resize blocks, link to project + tasks. **Recurring blocks** (series, RRULE, phantom occurrences). | The big visual module. |
 | 4 | **reconcile** | `actual_*`, evening review flow, plan-vs-actual overlay, per-occurrence edit/skip/detach. | Closes the loop. |
 | 5 | **rollups** | Project detail: planned/actual time, week/all-time, recursing subprojects. | Payoff of the relational model. |
-| 6+ | **later** | Day templates ("a typical Tuesday"), external calendar read-in, optionally skein's embeddings/Claude features. | Parked. |
+| 6 | **external calendars** | Read-only overlay of `.ics` file / ICS-URL sources (Google/iCloud/Outlook via secret iCal address, no OAuth). All-day band + timed overlay; right-click to adopt into a real block. | Dependency-free parser; cached, never in rollups. |
+| 7+ | **later** | Day templates ("a typical Tuesday"), optionally skein's embeddings/Claude features. | Parked. |
 
 Recurrence is front-loaded into module 3 (not deferred) because retrofitting a
 series/occurrence split onto a flat block table is the expensive kind of change.
@@ -229,14 +244,22 @@ series/occurrence split onto a flat block table is the expensive kind of change.
 
 - **Recurring tasks:** in v1 (mirrors recurring blocks via `task_series`).
 - **Plan-vs-actual rendering:** split column per day (planned | actual).
-- **Carry-over:** carrying a block **clones** it onto the next day. The original
-  stays put on its day, marked `status = carried`, so scrolling back to the
-  previous day still shows that the work was planned (and unfinished) there. The
-  clone is a fresh block on tomorrow, linked to the same project/tasks/notes.
+- **Carry-over:** carrying a block **clones** it onto a chosen day (default
+  tomorrow). The original stays put on its day, marked `status = carried`, so
+  scrolling back still shows that the work was planned (and unfinished) there.
+  The clone is a fresh block, linked to the same project/tasks/notes, and
+  records `carried_from` = the origin id for an audit trail.
+- **SQLite access:** Qt's bundled `QSQLITE` driver (`Qt6::Sql`), not a direct
+  `libsqlite3` link — keeps the dependency set to Qt alone. (Module 0.)
+- **External calendars:** read-only **overlay**, not imported as blocks. Cached
+  in `external_source` / `external_event` and surfaced via a separate query, so
+  they never touch reconcile or rollups. Recurrence is expanded at fetch time
+  into concrete instances (foreign RRULEs aren't round-tripped through our
+  subset). "Adopt" creates a real block and suppresses the overlay copy; the
+  link survives re-sync (matched on `uid`). Google support is "paste your secret
+  iCal URL" — no OAuth / native API. Parser is best-effort: `VTIMEZONE`,
+  `RDATE`, and `RECURRENCE-ID` overrides are skipped rather than erroring.
 
 ## Open questions (not yet decided)
 
-- SQLite access: `QtSql` driver vs. linking `libsqlite3` directly. (Decide in
-  module 0.)
-- Does a carried clone keep a back-reference to its origin (a `carried_from`
-  column) for an audit trail, or is the `carried` status on the original enough?
+- Nothing currently open for modules 0–6.

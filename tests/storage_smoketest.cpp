@@ -8,6 +8,7 @@
 #include <QTextStream>
 
 #include "storage/database.h"
+#include "storage/ical.h"
 #include "storage/recurrence.h"
 #include "storage/store.h"
 
@@ -34,7 +35,7 @@ int main(int argc, char** argv)
         err << "open failed: " << error << "\n";
         return 1;
     }
-    check("schema migrated to v1", db.schemaVersion() == 1);
+    check("schema migrated to v2", db.schemaVersion() == 2);
 
     Store s(db);
 
@@ -253,6 +254,118 @@ int main(int argc, char** argv)
     // Deleting the parent cascades to the subproject (FK ON DELETE CASCADE).
     s.deleteProject(zkId);
     check("deleteProject cascades to descendants", s.listProjects().isEmpty());
+
+    // --- external calendars (module 6): parse, expand, cache, adopt ----------
+    {
+        const QByteArray ics =
+            "BEGIN:VCALENDAR\r\n"
+            "VERSION:2.0\r\n"
+            "BEGIN:VEVENT\r\n"
+            "UID:utc-1\r\n"
+            "SUMMARY:UTC meeting\r\n"
+            "DTSTART:20260603T090000Z\r\n"
+            "DTEND:20260603T100000Z\r\n"
+            "END:VEVENT\r\n"
+            "BEGIN:VEVENT\r\n"
+            "UID:tz-1\r\n"
+            "SUMMARY:Zoned lunch\r\n"
+            "DTSTART;TZID=America/New_York:20260603T120000\r\n"
+            "DTEND;TZID=America/New_York:20260603T130000\r\n"
+            "END:VEVENT\r\n"
+            "BEGIN:VEVENT\r\n"
+            "UID:allday-1\r\n"
+            "SUMMARY:Conference\r\n"
+            "DESCRIPTION:folded line\r\n"
+            " continues here\r\n"
+            "DTSTART;VALUE=DATE:20260604\r\n"
+            "DTEND;VALUE=DATE:20260605\r\n"
+            "END:VEVENT\r\n"
+            "BEGIN:VEVENT\r\n"
+            "UID:weekly-1\r\n"
+            "SUMMARY:Standup\r\n"
+            "DTSTART:20260601T140000Z\r\n"
+            "DTEND:20260601T141500Z\r\n"
+            "RRULE:FREQ=WEEKLY\r\n"
+            "EXDATE:20260608T140000Z\r\n"
+            "END:VEVENT\r\n"
+            "END:VCALENDAR\r\n";
+
+        QString perr;
+        const QList<ICalEvent> parsed = parseICalendar(ics, &perr);
+        check("parse yields four VEVENTs", parsed.size() == 4 && perr.isEmpty());
+
+        // TZID resolution: 12:00 America/New_York on 2026-06-03 (EDT, UTC-4) = 16:00Z.
+        bool tzOk = false, allDayOk = false;
+        for (const ICalEvent& e : parsed) {
+            if (e.uid == QStringLiteral("tz-1"))
+                tzOk = (e.start.toUTC().time() == QTime(16, 0));
+            if (e.uid == QStringLiteral("allday-1"))
+                allDayOk = e.allDay;
+        }
+        check("TZID start converts to the right UTC instant", tzOk);
+        check("VALUE=DATE event is flagged all-day", allDayOk);
+
+        const QDateTime jun1(QDate(2026, 6, 1), QTime(0, 0));
+        const QDateTime jul1(QDate(2026, 6, 30), QTime(23, 59));
+        const QList<ICalEvent> expanded = expandICalEvents(parsed, jun1, jul1);
+        // 3 one-off + 4 weekly Mondays (Jun 8 dropped by EXDATE) = 7.
+        check("expansion drops the EXDATE occurrence (7 instances)",
+              expanded.size() == 7);
+        const bool noJun8 = std::none_of(
+            expanded.begin(), expanded.end(), [](const ICalEvent& e) {
+                return e.start.toUTC().date() == QDate(2026, 6, 8);
+            });
+        check("no instance lands on the excluded date", noJun8);
+
+        // Cache into a source and read it back through the store.
+        ExternalSource src;
+        src.kind = ExternalSource::Kind::Url;
+        src.location = QStringLiteral("https://example.test/cal.ics");
+        src.name = QStringLiteral("Work");
+        const Id srcId = s.createExternalSource(src);
+        check("external source persists",
+              s.listExternalSources().size() == 1
+                  && s.listExternalSources().first().id == srcId);
+
+        QList<ExternalEvent> evs;
+        for (const ICalEvent& ie : expanded) {
+            ExternalEvent e;
+            e.uid = ie.uid;
+            e.summary = ie.summary;
+            e.location = ie.location;
+            e.start = ie.start;
+            e.end = ie.end;
+            e.allDay = ie.allDay;
+            evs.append(e);
+        }
+        s.replaceSourceEvents(srcId, evs);
+        const auto cached = s.externalEventsInRange(jun1, jul1);
+        check("cached events round-trip through the store", cached.size() == 7);
+        const bool allDayPersisted = std::any_of(
+            cached.begin(), cached.end(), [](const ExternalEvent& e) {
+                return e.uid == QStringLiteral("allday-1") && e.allDay;
+            });
+        check("all-day flag survives the round-trip", allDayPersisted);
+
+        // Adopt the all-day event into a block; it then drops from the overlay.
+        Id adoptEventId = -1;
+        for (const ExternalEvent& e : cached)
+            if (e.uid == QStringLiteral("allday-1"))
+                adoptEventId = e.id;
+        Block adopted;
+        adopted.title = QStringLiteral("Conference (adopted)");
+        adopted.plannedStart = QDateTime(QDate(2026, 6, 4), QTime(0, 0));
+        adopted.plannedEnd = QDateTime(QDate(2026, 6, 5), QTime(0, 0));
+        const Id adoptBlockId = s.createBlock(adopted);
+        s.markEventAdopted(adoptEventId, adoptBlockId);
+        check("adopted event leaves the overlay",
+              s.externalEventsInRange(jun1, jul1).size() == 6);
+
+        // Re-sync must preserve the adoption (matched on uid).
+        s.replaceSourceEvents(srcId, evs);
+        check("re-sync keeps the adopted event suppressed",
+              s.externalEventsInRange(jun1, jul1).size() == 6);
+    }
 
     out << "\nstorage smoke test: "
         << (failed == 0 ? "all passed" : "FAILURES") << "\n";

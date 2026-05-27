@@ -1,6 +1,8 @@
 #include "app/main_window.h"
 
+#include "app/calendar_sources_dialog.h"
 #include "app/calendar_view.h"
+#include "app/external_sync.h"
 #include "app/note_editor.h"
 #include "app/note_list_panel.h"
 #include "app/project_tree_panel.h"
@@ -14,6 +16,7 @@
 #include <QMenu>
 #include <QMenuBar>
 #include <QSplitter>
+#include <QStatusBar>
 #include <QTabWidget>
 
 namespace zb {
@@ -29,6 +32,7 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
     m_time     = new TimeRollupPanel(store, this);
     m_editor   = new NoteEditor(store, this);
     m_calendar = new CalendarView(store, this);
+    m_sync     = new ExternalSync(store, this);
 
     // Project workspace: Notes / Tasks / Time tabs alongside the editor.
     auto* middle = new QTabWidget(this);
@@ -67,6 +71,11 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
             m_time->recompute();
         }
     });
+    appMenu->addAction(QStringLiteral("Calendars…"), this, [this] {
+        CalendarSourcesDialog dlg(m_store, *m_sync, this);
+        dlg.exec();
+        m_calendar->reload(); // reflect adds/removes
+    });
     appMenu->addSeparator();
     appMenu->addAction(QStringLiteral("Quit"), this, &QMainWindow::close);
 
@@ -89,6 +98,17 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
     // editor renames flow back to the list label
     connect(m_editor, &NoteEditor::noteTitleChanged, m_notes,
             &NoteListPanel::updateNoteTitle);
+
+    // External calendars: repaint when a source's cache updates, and pull all
+    // enabled sources once on launch (file reads are synchronous; URL fetches
+    // land asynchronously and trigger another reload when they arrive).
+    connect(m_sync, &ExternalSync::refreshed, m_calendar,
+            &CalendarView::reload);
+    // Surface sync problems non-modally (e.g. a bad URL on launch).
+    connect(m_sync, &ExternalSync::failed, this, [this](const QString& msg) {
+        statusBar()->showMessage(QStringLiteral("Calendar: ") + msg, 8000);
+    });
+    m_sync->refreshAll();
 }
 
 void MainWindow::closeEvent(QCloseEvent* event)
