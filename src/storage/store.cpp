@@ -257,6 +257,110 @@ void Store::deleteNote(Id noteId)
     q.exec();
 }
 
+Id Store::noteIdByTitle(const QString& title)
+{
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral(
+        "SELECT id FROM note WHERE title = ? ORDER BY updated_at DESC LIMIT 1"));
+    q.addBindValue(title);
+    q.exec();
+    return q.next() ? q.value(0).toLongLong() : -1;
+}
+
+QStringList Store::noteTitles()
+{
+    QStringList out;
+    QSqlQuery q(m_db.handle());
+    q.exec(QStringLiteral(
+        "SELECT DISTINCT title FROM note WHERE title <> '' ORDER BY title"));
+    while (q.next())
+        out.append(q.value(0).toString());
+    return out;
+}
+
+// ---- images -----------------------------------------------------------------
+
+Id Store::putImage(const QString& sha256, const QString& mime,
+                   const QByteArray& bytes, const QString& path)
+{
+    // Dedup: identical content (same sha) reuses the existing row.
+    QSqlQuery find(m_db.handle());
+    find.prepare(QStringLiteral("SELECT id FROM image WHERE sha256 = ?"));
+    find.addBindValue(sha256);
+    find.exec();
+    if (find.next())
+        return find.value(0).toLongLong();
+
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral(
+        "INSERT INTO image(sha256, mime, bytes, path, created_at) "
+        "VALUES(?,?,?,?,?)"));
+    q.addBindValue(sha256);
+    q.addBindValue(txt(mime));
+    q.addBindValue(bytes.isEmpty() ? QVariant() : QVariant(bytes));
+    q.addBindValue(path.isEmpty() ? QVariant() : QVariant(path));
+    q.addBindValue(toEpoch(QDateTime::currentDateTimeUtc()));
+    q.exec();
+    return q.lastInsertId().toLongLong();
+}
+
+Image Store::image(Id imageId)
+{
+    Image img;
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral(
+        "SELECT id, sha256, mime, bytes, path, created_at FROM image WHERE id = ?"));
+    q.addBindValue(imageId);
+    q.exec();
+    if (q.next()) {
+        img.id        = q.value(0).toLongLong();
+        img.sha256    = q.value(1).toString();
+        img.mime      = q.value(2).toString();
+        img.bytes     = q.value(3).toByteArray();
+        img.path      = q.value(4).toString();
+        img.createdAt = fromEpoch(q.value(5));
+    }
+    return img;
+}
+
+QList<Id> Store::imageIds()
+{
+    QList<Id> out;
+    QSqlQuery q(m_db.handle());
+    q.exec(QStringLiteral("SELECT id FROM image"));
+    while (q.next())
+        out.append(q.value(0).toLongLong());
+    return out;
+}
+
+void Store::deleteImage(Id imageId)
+{
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral("DELETE FROM image WHERE id = ?"));
+    q.addBindValue(imageId);
+    q.exec();
+}
+
+void Store::setImageStorage(Id imageId, const QByteArray& bytes, const QString& path)
+{
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral("UPDATE image SET bytes = ?, path = ? WHERE id = ?"));
+    q.addBindValue(bytes.isEmpty() ? QVariant() : QVariant(bytes));
+    q.addBindValue(path.isEmpty() ? QVariant() : QVariant(path));
+    q.addBindValue(imageId);
+    q.exec();
+}
+
+QStringList Store::allNoteBodies()
+{
+    QStringList out;
+    QSqlQuery q(m_db.handle());
+    q.exec(QStringLiteral("SELECT body_md FROM note"));
+    while (q.next())
+        out.append(q.value(0).toString());
+    return out;
+}
+
 // ---- tasks ------------------------------------------------------------------
 
 Id Store::createTask(const Task& t)

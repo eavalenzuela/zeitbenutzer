@@ -21,6 +21,7 @@ public:
 
 public slots:
     void setProject(zb::Id projectId);   // -1 clears
+    void selectNote(zb::Id noteId);      // highlight a note already in the list
     void reload();
     // Refresh the label of a note already in the list (e.g. title edited).
     void updateNoteTitle(zb::Id noteId, const QString& title);

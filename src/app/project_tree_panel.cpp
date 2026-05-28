@@ -113,6 +113,11 @@ Id ProjectTreePanel::selectedProjectId() const
     return idx.data(kIdRole).toLongLong();
 }
 
+void ProjectTreePanel::selectProject(Id id)
+{
+    selectProjectById(id); // setCurrentIndex → onCurrentChanged → projectSelected
+}
+
 void ProjectTreePanel::selectProjectById(Id id)
 {
     // Walk the whole tree looking for the matching id.

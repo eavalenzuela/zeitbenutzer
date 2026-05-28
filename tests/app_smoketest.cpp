@@ -4,9 +4,16 @@
 // a construction/wiring smoke, not a pixel test.
 
 #include <QApplication>
+#include <QBuffer>
 #include <QDir>
 #include <QFile>
+#include <QImage>
+#include <QStandardPaths>
+#include <QTextBlock>
+#include <QTextCursor>
+#include <QTextDocument>
 #include <QTextStream>
+#include <QTextTable>
 
 #include "app/adopt_dialog.h"
 #include "app/calendar_sources_dialog.h"
@@ -14,7 +21,10 @@
 #include "app/day_review_dialog.h"
 #include "app/external_sync.h"
 #include "app/main_window.h"
+#include "app/markdown_image.h"
+#include "app/markdown_renderer.h"
 #include "app/reconcile_panel.h"
+#include "app/syntax_help.h"
 #include "app/note_list_panel.h"
 #include "app/project_tree_panel.h"
 #include "app/task_list_panel.h"
@@ -30,6 +40,9 @@ int main(int argc, char** argv)
 {
     qputenv("QT_QPA_PLATFORM", "offscreen");
     QApplication app(argc, argv);
+    // Isolate Settings + any disk-backed image writes into a temp dir, not the
+    // real app-data location.
+    QStandardPaths::setTestModeEnabled(true);
     QTextStream out(stdout);
 
     int failed = 0;
@@ -260,6 +273,190 @@ int main(int argc, char** argv)
                   && editor.source().kind == ExternalSource::Kind::Url);
         QFile::remove(path);
     }
+
+    // Markdown converter seam (Phase 1): the renderer owns markdown→HTML; verify
+    // the standard constructs still produce the expected HTML and it's robust to
+    // empty/edge input. This is the chokepoint later phases hang custom syntax on.
+    {
+        const QString h = MarkdownRenderer::toHtml(QStringLiteral("# Title"));
+        check("renderer emits a heading", h.contains(QStringLiteral("<h1")));
+        const QString list =
+            MarkdownRenderer::toHtml(QStringLiteral("- one\n- two"));
+        check("renderer emits list items", list.contains(QStringLiteral("<li")));
+        const QString link = MarkdownRenderer::toHtml(
+            QStringLiteral("[x](https://example.test)"));
+        check("renderer emits a link", link.contains(QStringLiteral("href")));
+        check("renderer preserves prose text",
+              MarkdownRenderer::toHtml(QStringLiteral("hello world"))
+                  .contains(QStringLiteral("hello world")));
+        check("renderer survives empty input",
+              !MarkdownRenderer::toHtml(QString()).isEmpty());
+
+        // Parity with the old setMarkdown path on a single inline-formatted line
+        // (no lists/quotes/multi-line, which the seam now intentionally diverges
+        // on via checkboxes/quote-bar/hard-breaks): inline prose still round-trips.
+        const QString sample =
+            QStringLiteral("Some **bold**, *italic*, and `code` in one line.");
+        QTextDocument direct;
+        direct.setMarkdown(sample, QTextDocument::MarkdownDialectGitHub);
+        QTextDocument viaSeam;
+        viaSeam.setHtml(MarkdownRenderer::toHtml(sample));
+        check("HTML seam preserves inline prose content",
+              viaSeam.toPlainText() == direct.toPlainText());
+
+        // Hard-wrap preference: a single newline becomes a line break, while a
+        // blank line still separates paragraphs.
+        QTextDocument hb;
+        hb.setHtml(MarkdownRenderer::toHtml(QStringLiteral("first line\nsecond line\n")));
+        check("single newline renders as a hard line break",
+              hb.toPlainText().contains(QStringLiteral("first line\nsecond line")));
+
+        // Phase 2 — task checkboxes. `- [ ]`/`- [x]` survive the seam as real
+        // checkbox markers, and the done glyph is our preferred ☑ (U+2611).
+        const QString tasks =
+            MarkdownRenderer::toHtml(QStringLiteral("- [ ] todo\n- [x] done\n"));
+        QTextDocument tdoc;
+        tdoc.setHtml(tasks);
+        bool sawUnchecked = false, sawChecked = false;
+        for (QTextBlock b = tdoc.begin(); b != tdoc.end(); b = b.next()) {
+            const auto m = b.blockFormat().marker();
+            sawUnchecked |= (m == QTextBlockFormat::MarkerType::Unchecked);
+            sawChecked |= (m == QTextBlockFormat::MarkerType::Checked);
+        }
+        check("checkboxes render as native task markers through the seam",
+              sawUnchecked && sawChecked); // Qt draws ☐/☒ from the marker type
+
+        // Phase 3 — fenced code blocks: one <pre>, preserved indentation, themed
+        // keyword color; unknown language degrades to verbatim; blockquotes get
+        // the bar + tint. (Runs before the theme switches below, so currentTheme
+        // is the default light theme.)
+        const QString code = MarkdownRenderer::toHtml(QStringLiteral(
+            "```python\ndef f():\n        return 1  # c\n```\n"));
+        check("code block renders as a single <pre>",
+              code.count(QStringLiteral("<pre")) == 1);
+        check("code keyword is colored from the theme",
+              code.contains(QStringLiteral("color:%1").arg(lightTheme().synKeyword.name())));
+        check("code indentation is preserved",
+              code.contains(QStringLiteral("        <span"))); // 8 leading spaces kept
+        const QString unk = MarkdownRenderer::toHtml(
+            QStringLiteral("```nosuchlang\nx = 1\n```\n"));
+        check("unknown language still renders code verbatim",
+              unk.contains(QStringLiteral("<pre")) && unk.contains(QStringLiteral("x = 1")));
+        check("unterminated fence doesn't drop later content",
+              MarkdownRenderer::toHtml(QStringLiteral("```\nstill typing\n"))
+                  .contains(QStringLiteral("still typing")));
+        const QString quote = MarkdownRenderer::toHtml(QStringLiteral("> quoted line\n"));
+        check("blockquote gets a bar glyph and a background tint",
+              quote.contains(QString::fromUtf8("▎"))
+                  && quote.contains(QStringLiteral("background-color")));
+
+        // Phase 4 — :::csv/:::tsv tables.
+        const QString tbl = MarkdownRenderer::toHtml(QStringLiteral(
+            ":::csv Cap\nName,Count\n\"a, b\",3\nx,12\n:::\n"));
+        check("table renders <table> with header and caption",
+              tbl.contains(QStringLiteral("<table")) && tbl.contains(QStringLiteral("<th"))
+                  && tbl.contains(QStringLiteral("Cap")));
+        check("quoted cell keeps the delimiter inside it",
+              tbl.contains(QStringLiteral(">a, b<")));
+        check("numeric column is right-aligned",
+              tbl.contains(QStringLiteral("text-align:right")));
+        // Render-level: Qt actually builds a QTextTable from our HTML.
+        QTextDocument tdoc2;
+        tdoc2.setHtml(tbl);
+        bool hasTable = false;
+        for (QTextBlock b = tdoc2.begin(); b != tdoc2.end(); b = b.next()) {
+            if (QTextCursor(b).currentTable()) { hasTable = true; break; }
+        }
+        check("Qt renders the table as a real QTextTable", hasTable);
+        check("noheader yields no header cells",
+              !MarkdownRenderer::toHtml(QStringLiteral(":::csv noheader\na,b\n:::\n"))
+                   .contains(QStringLiteral("<th")));
+        const QString semi = MarkdownRenderer::toHtml(
+            QStringLiteral(":::csv delim=;\nh1;h2\nx;y\n:::\n"));
+        check("delim override splits on the chosen character",
+              semi.count(QStringLiteral("<th ")) == 2 && semi.count(QStringLiteral("<td ")) == 2);
+        check("ragged rows are padded to the widest row",
+              MarkdownRenderer::toHtml(QStringLiteral(":::csv noheader\na,b,c\nx\n:::\n"))
+                  .count(QStringLiteral("<td ")) == 6); // 2 rows × 3 cols
+        check("unterminated table fence is not rendered as a table",
+              !MarkdownRenderer::toHtml(QStringLiteral(":::csv\na,b\n"))
+                   .contains(QStringLiteral("<table")));
+    }
+
+    // Phase 5 — image embeds (import, dedup, scaling, render, orphan sweep).
+    {
+        QImage red(20, 10, QImage::Format_RGB32);
+        red.fill(Qt::red);
+        QByteArray png;
+        QBuffer buf(&png);
+        buf.open(QIODevice::WriteOnly);
+        red.save(&buf, "PNG");
+
+        const QString token = importImageData(store, png);
+        check("importImageData returns a zb-img token",
+              token.startsWith(QStringLiteral("![image](zb-img:"))
+                  && token.endsWith(QStringLiteral(")")));
+        const QString token2 = importImageData(store, png);
+        check("identical image dedups to the same token", token2 == token);
+
+        // token == "![image](zb-img:<id>)"
+        const Id imgId =
+            token.section(QStringLiteral("zb-img:"), 1).chopped(1).toLongLong();
+        check("loadImageResource returns the image at native size",
+              loadImageResource(store, imgId, 0).width() == 20);
+        check("loadImageResource scales down to maxWidth",
+              loadImageResource(store, imgId, 8).width() == 8);
+        check("loadImageResource does not upscale past native width",
+              loadImageResource(store, imgId, 100).width() == 20);
+
+        // Render path: the token becomes an <img> with our scheme + query.
+        check("image token renders as an <img> with the zb-img scheme",
+              MarkdownRenderer::toHtml(QStringLiteral("![x](zb-img:%1?maxwidth=400)")
+                                           .arg(imgId))
+                  .contains(QStringLiteral("<img src=\"zb-img:%1?maxwidth=400\"").arg(imgId)));
+
+        // Orphan sweep: a note referencing the image keeps it; remove the note
+        // and the image is reclaimed.
+        Note in;
+        in.projectId = pid;
+        in.title = QStringLiteral("has image");
+        in.bodyMd = token;
+        const Id inId = store.createNote(in);
+        check("referenced image survives the sweep",
+              sweepOrphanImages(store) == 0 && store.imageIds().contains(imgId));
+        store.deleteNote(inId);
+        check("unreferenced image is reclaimed by the sweep",
+              sweepOrphanImages(store) == 1 && !store.imageIds().contains(imgId));
+    }
+
+    // Phase 6 — wikilinks. `[[Title]]` resolves to an in-app anchor when a store
+    // is supplied; unknown titles stay literal; no store → literal.
+    {
+        Note wl;
+        wl.projectId = pid;
+        wl.title = QStringLiteral("Linked Target");
+        store.createNote(wl);
+        RenderContext ctx;
+        ctx.store = &store;
+        const QString html = MarkdownRenderer::toHtml(
+            QStringLiteral("go to [[Linked Target]] and [[No Such Note]]"), ctx);
+        check("resolved wikilink becomes a zb://note anchor",
+              html.contains(QStringLiteral("href=\"zb://note/"))
+                  && html.contains(QStringLiteral(">Linked Target</a>")));
+        check("unresolved wikilink stays literal",
+              html.contains(QStringLiteral("[[No Such Note]]")));
+        check("wikilinks need a store (none → literal text)",
+              MarkdownRenderer::toHtml(QStringLiteral("[[Linked Target]]"))
+                  .contains(QStringLiteral("[[Linked Target]]")));
+        check("noteIdByTitle/noteTitles back link resolution + completion",
+              store.noteIdByTitle(QStringLiteral("Linked Target")) > 0
+                  && store.noteTitles().contains(QStringLiteral("Linked Target")));
+    }
+
+    // Syntax help panel constructs and shows headless.
+    showSyntaxHelp(&w);
+    app.processEvents();
+    check("markdown syntax help panel opens without crash", true);
 
     // Themes + project colors.
     applyTheme(app, darkTheme());

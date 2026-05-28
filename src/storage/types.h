@@ -4,6 +4,7 @@
 // stores in store.h read/write these. Times are QDateTime (stored as UTC epoch
 // seconds); occurrence dates are QDate (stored as 'yyyy-MM-dd' text).
 
+#include <QByteArray>
 #include <QDate>
 #include <QDateTime>
 #include <QString>
@@ -35,6 +36,18 @@ struct Note {
     QString   bodyMd;
     QDateTime createdAt;
     QDateTime updatedAt;
+};
+
+// An image embedded in note markdown (referenced as `![alt](zb-img:ID)`).
+// Content-addressed by sha256 (dedups identical pastes). Exactly one of `bytes`
+// (SQLite blob backend) or `path` (files-beside-the-db backend) is populated.
+struct Image {
+    Id         id = -1;
+    QString    sha256;
+    QString    mime;
+    QByteArray bytes;   // empty when stored on disk
+    QString    path;    // relative filename when stored on disk; empty for blob
+    QDateTime  createdAt;
 };
 
 // Recurring task template (e.g. "water plants daily").

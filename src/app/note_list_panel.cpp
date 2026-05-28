@@ -70,6 +70,16 @@ Id NoteListPanel::selectedNoteId() const
     return item ? item->data(kIdRole).toLongLong() : -1;
 }
 
+void NoteListPanel::selectNote(Id noteId)
+{
+    for (int i = 0; i < m_list->count(); ++i) {
+        if (m_list->item(i)->data(kIdRole).toLongLong() == noteId) {
+            m_list->setCurrentRow(i); // emits noteSelected via onCurrentRowChanged
+            return;
+        }
+    }
+}
+
 void NoteListPanel::onNewNote()
 {
     if (m_projectId <= 0)

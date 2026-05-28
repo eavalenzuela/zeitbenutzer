@@ -35,7 +35,7 @@ int main(int argc, char** argv)
         err << "open failed: " << error << "\n";
         return 1;
     }
-    check("schema migrated to v2", db.schemaVersion() == 2);
+    check("schema migrated to v3", db.schemaVersion() == 3);
 
     Store s(db);
 
@@ -365,6 +365,54 @@ int main(int argc, char** argv)
         s.replaceSourceEvents(srcId, evs);
         check("re-sync keeps the adopted event suppressed",
               s.externalEventsInRange(jun1, jul1).size() == 6);
+    }
+
+    // --- images (markdown embeds) --------------------------------------------
+    {
+        const QByteArray png("\x89PNG\r\n\x1a\nfake-bytes", 18);
+        const Id img1 = s.putImage(QStringLiteral("sha-aaa"),
+                                   QStringLiteral("image/png"), png, QString());
+        check("putImage inserts a blob image", img1 > 0);
+
+        // Same sha → dedup to the same row, not a second insert.
+        const Id dup = s.putImage(QStringLiteral("sha-aaa"),
+                                  QStringLiteral("image/png"), png, QString());
+        check("putImage dedups by sha256", dup == img1);
+        check("only one image row exists", s.imageIds().size() == 1);
+
+        const Image got = s.image(img1);
+        check("image round-trips bytes + mime",
+              got.bytes == png && got.mime == QStringLiteral("image/png")
+                  && got.path.isEmpty());
+
+        // Migrate it to the disk backend (bytes → path).
+        s.setImageStorage(img1, QByteArray(), QStringLiteral("images/aaa.png"));
+        const Image moved = s.image(img1);
+        check("setImageStorage repoints blob → disk",
+              moved.bytes.isEmpty() && moved.path == QStringLiteral("images/aaa.png"));
+
+        // A disk-backed second image, then delete it.
+        const Id img2 = s.putImage(QStringLiteral("sha-bbb"),
+                                   QStringLiteral("image/jpeg"), QByteArray(),
+                                   QStringLiteral("images/bbb.jpg"));
+        check("two distinct images stored", s.imageIds().size() == 2 && img2 != img1);
+        s.deleteImage(img2);
+        check("deleteImage removes the row", s.imageIds().size() == 1);
+
+        // allNoteBodies feeds the orphan sweep (app layer parses zb-img tokens).
+        Project ip;
+        ip.name = QStringLiteral("img_project");
+        const Id ipId = s.createProject(ip);
+        Note n;
+        n.projectId = ipId;
+        n.title = QStringLiteral("with image");
+        n.bodyMd = QStringLiteral("see ![x](zb-img:%1)").arg(img1);
+        s.createNote(n);
+        bool found = false;
+        for (const QString& body : s.allNoteBodies())
+            if (body.contains(QStringLiteral("zb-img:%1").arg(img1)))
+                found = true;
+        check("allNoteBodies surfaces image references", found);
     }
 
     out << "\nstorage smoke test: "
