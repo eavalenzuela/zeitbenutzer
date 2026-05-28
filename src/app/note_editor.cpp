@@ -2,6 +2,7 @@
 
 #include "app/markdown_image.h"
 #include "app/markdown_renderer.h"
+#include "app/syntax_help.h"
 #include "app/theme.h"
 #include "app/typography.h"
 #include "storage/store.h"
@@ -21,9 +22,11 @@
 #include <QPushButton>
 #include <QSplitter>
 #include <QStringListModel>
+#include <QStyle>
 #include <QTextBlock>
 #include <QTextBrowser>
 #include <QTimer>
+#include <QToolButton>
 #include <QUrl>
 #include <QUrlQuery>
 #include <QVBoxLayout>
@@ -203,6 +206,12 @@ NoteEditor::NoteEditor(Store& store, QWidget* parent)
     m_insertImage = new QPushButton(QStringLiteral("Insert image…"), this);
     connect(m_insertImage, &QPushButton::clicked, this, &NoteEditor::insertImage);
     header->addWidget(m_insertImage);
+    auto* help = new QToolButton(this);
+    help->setAutoRaise(true);
+    help->setIcon(style()->standardIcon(QStyle::SP_MessageBoxInformation));
+    help->setToolTip(QStringLiteral("Markdown syntax"));
+    connect(help, &QToolButton::clicked, this, [this] { showSyntaxHelp(this); });
+    header->addWidget(help);
     layout->addLayout(header);
 
     auto* split = new QSplitter(Qt::Horizontal, this);

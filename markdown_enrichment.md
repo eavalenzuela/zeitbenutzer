@@ -348,7 +348,16 @@ _Largest phase — touches schema v3, store API, Settings, the editor (insertion
 
 ---
 
-## Cross-cutting feature — in-editor syntax help
+## Cross-cutting feature — in-editor syntax help ✅ (built)
+Implemented in `syntax_help.{h,cpp}`: `showSyntaxHelp(parent)` opens (or raises)
+a single shared non-modal `QDialog` holding a scrollable `QTextBrowser`
+cheat-sheet. Hand-written HTML (shows syntax literally beside its effect),
+inherits the app palette so it tracks the theme. Two entry points: the editor's
+`SP_MessageBoxInformation` info button (title row) and `Help → Markdown Syntax…`
+(a new Help menu). Covers text/lists/tasks/links/images/code-langs/tables — only
+what Phases 1-6 actually render. Original spec below.
+
+
 
 An `i`-in-circle info icon in the note editor opens a **scrollable, sectioned
 cheat-sheet** of the supported markdown syntax. Decided 2026-05-27.
@@ -385,4 +394,4 @@ cheat-sheet** of the supported markdown syntax. Decided 2026-05-27.
 - [x] Phase 4 — CSV/TSV tables (segmentation + markdown_table; real QTextTable; tested)
 - [x] Phase 5 — images (schema v3, blob/disk backends, paste/drop/picker, GC; tested)
 - [x] Phase 6 — wikilinks + completion (render/navigate/complete; tested)
-- [ ] Cross-cutting — in-editor syntax help panel (deferred; content grows per phase)
+- [x] Cross-cutting — syntax help panel + Help menu (info icon + Help → Markdown Syntax…)

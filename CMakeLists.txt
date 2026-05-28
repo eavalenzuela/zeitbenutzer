@@ -46,6 +46,7 @@ add_library(zb-app STATIC
     src/app/code_highlight.cpp
     src/app/markdown_table.cpp
     src/app/markdown_image.cpp
+    src/app/syntax_help.cpp
     src/app/typography.cpp
     src/app/theme.cpp
     src/app/settings.cpp

@@ -24,6 +24,7 @@
 #include "app/markdown_image.h"
 #include "app/markdown_renderer.h"
 #include "app/reconcile_panel.h"
+#include "app/syntax_help.h"
 #include "app/note_list_panel.h"
 #include "app/project_tree_panel.h"
 #include "app/task_list_panel.h"
@@ -451,6 +452,11 @@ int main(int argc, char** argv)
               store.noteIdByTitle(QStringLiteral("Linked Target")) > 0
                   && store.noteTitles().contains(QStringLiteral("Linked Target")));
     }
+
+    // Syntax help panel constructs and shows headless.
+    showSyntaxHelp(&w);
+    app.processEvents();
+    check("markdown syntax help panel opens without crash", true);
 
     // Themes + project colors.
     applyTheme(app, darkTheme());

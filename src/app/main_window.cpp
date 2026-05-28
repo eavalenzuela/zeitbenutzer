@@ -9,6 +9,7 @@
 #include "app/project_tree_panel.h"
 #include "app/settings.h"
 #include "app/settings_dialog.h"
+#include "app/syntax_help.h"
 #include "app/task_list_panel.h"
 #include "app/theme.h"
 #include "app/time_rollup_panel.h"
@@ -89,6 +90,10 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
     });
     appMenu->addSeparator();
     appMenu->addAction(QStringLiteral("Quit"), this, &QMainWindow::close);
+
+    QMenu* helpMenu = menuBar()->addMenu(QStringLiteral("&Help"));
+    helpMenu->addAction(QStringLiteral("Markdown Syntax…"), this,
+                        [this] { showSyntaxHelp(this); });
 
     // Reclaim images orphaned since last run (cheap full scan on a local db).
     sweepOrphanImages(m_store);
