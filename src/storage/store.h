@@ -17,12 +17,23 @@ public:
     explicit Store(Database& db) : m_db(db) {}
 
     // --- projects ------------------------------------------------------------
+    // A project's place in the tree after a drag-reorder: new parent + sibling
+    // position. parentId == nullopt means top level.
+    struct ProjectPosition {
+        Id                id = -1;
+        std::optional<Id> parentId;
+        int               sort = 0;
+    };
+
     Id            createProject(const Project& p);
     QList<Project> listProjects(bool includeArchived = false);
     // The project plus all transitive descendants (for rolled-up queries).
     QList<Id>     projectAndDescendants(Id rootId);
     void          renameProject(Id projectId, const QString& name);
     void          setProjectColor(Id projectId, const QString& hex);
+    // Commit a drag-reorder of the tree: rewrite parent_id + sort for the given
+    // projects in one transaction.
+    void          setProjectPositions(const QList<ProjectPosition>& positions);
     // Cascades to descendant projects and their notes/tasks (FK ON DELETE).
     void          deleteProject(Id projectId);
 
@@ -32,6 +43,8 @@ public:
     Note        note(Id noteId);          // id<=0 result if not found
     void        updateNote(Id noteId, const QString& title, const QString& body);
     void        deleteNote(Id noteId);
+    // Commit a drag-reorder: assign sort = list position for the given note ids.
+    void        setNoteOrder(const QList<Id>& orderedIds);
     // Wikilink support: resolve `[[Title]]` to a note id (most-recent on
     // duplicate titles; -1 if none), and list titles for completion.
     Id          noteIdByTitle(const QString& title);
@@ -60,6 +73,8 @@ public:
     void        updateTask(Id taskId, const QString& title, int estimateMin);
     void        deleteTask(Id taskId);
     QList<Task> tasksForProject(Id projectId);
+    // Commit a drag-reorder: assign sort = list position for the given task ids.
+    void        setTaskOrder(const QList<Id>& orderedIds);
 
     // --- series --------------------------------------------------------------
     Id createBlockSeries(const BlockSeries& s);

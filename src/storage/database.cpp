@@ -15,7 +15,7 @@ QString nextConnectionName()
 }
 
 // Schema version this build expects. Bump + add a branch in migrate() to evolve.
-constexpr int kSchemaVersion = 3;
+constexpr int kSchemaVersion = 4;
 
 // Full v1 schema. Applied in one transaction when user_version == 0.
 const char* const kSchemaV1 = R"SQL(
@@ -154,6 +154,22 @@ CREATE TABLE image (
 );
 )SQL";
 
+// v4: manual note ordering. Notes previously sorted by `updated_at DESC`; give
+// them an explicit `sort` like projects/tasks so the user can drag to reorder.
+// Backfill preserves each project's current updated-first order as the starting
+// manual order (rank = count of same-project notes that are newer). The COUNT
+// subquery is used instead of a window function for SQLite-version portability.
+const char* const kSchemaV4 = R"SQL(
+ALTER TABLE note ADD COLUMN sort INTEGER NOT NULL DEFAULT 0;
+
+UPDATE note SET sort = (
+    SELECT COUNT(*) FROM note AS n2
+    WHERE n2.project_id = note.project_id
+      AND (n2.updated_at > note.updated_at
+           OR (n2.updated_at = note.updated_at AND n2.id > note.id))
+);
+)SQL";
+
 } // namespace
 
 Database::~Database()
@@ -255,6 +271,11 @@ bool Database::migrate(QString* error)
     }
     if (version < 3) {
         runScript(kSchemaV3, &ok);
+        if (!ok)
+            return false;
+    }
+    if (version < 4) {
+        runScript(kSchemaV4, &ok);
         if (!ok)
             return false;
     }

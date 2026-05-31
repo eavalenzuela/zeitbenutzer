@@ -68,6 +68,7 @@ set(ZB_MACOS_ICON ${CMAKE_SOURCE_DIR}/packaging/icons/zeitbenutzer.icns)
 add_executable(zeitbenutzer
     src/app/main.cpp
     assets/fonts.qrc
+    app_icon.qrc
     $<$<PLATFORM_ID:Darwin>:${ZB_MACOS_ICON}>
 )
 target_link_libraries(zeitbenutzer PRIVATE zb-app)

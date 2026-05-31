@@ -42,6 +42,7 @@ private:
     int  selectedEstimate() const;
     void styleItem(QListWidgetItem* item, TaskStatus status);
     void setDetailEnabled(bool on);
+    void persistOrder();   // write the list's visual order back as task `sort`
 
     Store&       m_store;
     QListWidget* m_list;

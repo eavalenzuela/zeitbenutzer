@@ -35,7 +35,8 @@ private slots:
     void onCurrentRowChanged();
 
 private:
-    Id  selectedNoteId() const;
+    Id   selectedNoteId() const;
+    void persistOrder();   // write the list's visual order back as note `sort`
 
     Store&       m_store;
     QListWidget* m_list;

@@ -35,7 +35,7 @@ int main(int argc, char** argv)
         err << "open failed: " << error << "\n";
         return 1;
     }
-    check("schema migrated to v3", db.schemaVersion() == 3);
+    check("schema migrated to v4", db.schemaVersion() == 4);
 
     Store s(db);
 
@@ -75,6 +75,57 @@ int main(int argc, char** argv)
     s.setTaskStatus(taskId, TaskStatus::Done, QDateTime::currentDateTimeUtc());
     check("task marked done", s.tasksForProject(worldId).first().status
                                   == TaskStatus::Done);
+
+    // --- manual reordering (notes / tasks / projects) ------------------------
+    {
+        // Three notes append in creation order; setNoteOrder flips them.
+        Note a, b, c;
+        a.projectId = b.projectId = c.projectId = zkId;
+        a.title = QStringLiteral("a");
+        b.title = QStringLiteral("b");
+        c.title = QStringLiteral("c");
+        const Id ia = s.createNote(a), ib = s.createNote(b), ic = s.createNote(c);
+        auto titles = [&] {
+            QStringList out;
+            for (const Note& nn : s.notesForProject(zkId))
+                out << nn.title;
+            return out;
+        };
+        check("notes append in creation order",
+              titles() == QStringList({"a", "b", "c"}));
+        s.setNoteOrder({ic, ia, ib});
+        check("setNoteOrder reorders", titles() == QStringList({"c", "a", "b"}));
+
+        // Tasks: same append-then-reorder.
+        Task t1, t2;
+        t1.projectId = t2.projectId = zkId;
+        t1.title = QStringLiteral("t1");
+        t2.title = QStringLiteral("t2");
+        const Id k1 = s.createTask(t1), k2 = s.createTask(t2);
+        check("tasks append in creation order",
+              s.tasksForProject(zkId).first().id == k1);
+        s.setTaskOrder({k2, k1});
+        check("setTaskOrder reorders",
+              s.tasksForProject(zkId).first().id == k2);
+
+        // Projects: re-parent worldgen to top level + place it before zk.
+        s.setProjectPositions({{worldId, std::nullopt, 0}, {zkId, std::nullopt, 1}});
+        const auto projs = s.listProjects();
+        check("setProjectPositions re-parents to top level",
+              !projs.first().parentId.has_value()
+                  && projs.first().id == worldId);
+        check("projectAndDescendants(zk) no longer includes worldgen",
+              s.projectAndDescendants(zkId).size() == 1);
+        // Restore the original hierarchy for the assertions that follow.
+        s.setProjectPositions({{zkId, std::nullopt, 0}, {worldId, zkId, 0}});
+        check("hierarchy restored",
+              s.projectAndDescendants(zkId).size() == 2);
+        // Clean up the extra notes/tasks so later counts stay as written.
+        for (Id id : {ia, ib, ic})
+            s.deleteNote(id);
+        for (Id id : {k1, k2})
+            s.deleteTask(id);
+    }
 
     // --- recurrence expander (standalone) ------------------------------------
     {
