@@ -1,0 +1,14 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+  <!-- The window/taskbar icon, bundled into the binary so it shows when running
+       uninstalled too. Same PNGs the freedesktop install step ships. -->
+  <qresource prefix="/icons">
+    <file alias="app-16.png">packaging/icons/hicolor/16.png</file>
+    <file alias="app-32.png">packaging/icons/hicolor/32.png</file>
+    <file alias="app-48.png">packaging/icons/hicolor/48.png</file>
+    <file alias="app-64.png">packaging/icons/hicolor/64.png</file>
+    <file alias="app-128.png">packaging/icons/hicolor/128.png</file>
+    <file alias="app-256.png">packaging/icons/hicolor/256.png</file>
+    <file alias="app-512.png">packaging/icons/hicolor/512.png</file>
+  </qresource>
+</RCC>
