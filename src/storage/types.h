@@ -36,6 +36,7 @@ struct Note {
     QString   bodyMd;
     QDateTime createdAt;
     QDateTime updatedAt;
+    int       sort = 0;              // manual order within the project
 };
 
 // An image embedded in note markdown (referenced as `![alt](zb-img:ID)`).

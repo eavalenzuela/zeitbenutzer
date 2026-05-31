@@ -1,5 +1,6 @@
 #include "app/task_list_panel.h"
 
+#include "app/reorderable_list_widget.h"
 #include "storage/store.h"
 
 #include <QComboBox>
@@ -34,7 +35,9 @@ TaskListPanel::TaskListPanel(Store& store, QWidget* parent)
                    &TaskListPanel::onDeleteTask);
     layout->addWidget(bar);
 
-    m_list = new QListWidget(this);
+    auto* list = new ReorderableListWidget(this);
+    list->onReordered = [this] { persistOrder(); };
+    m_list = list;
     layout->addWidget(m_list, 1);
 
     // Detail row for the selected task: status + estimate.
@@ -101,6 +104,15 @@ void TaskListPanel::reload()
     }
     m_loading = false;
     setDetailEnabled(false);
+}
+
+void TaskListPanel::persistOrder()
+{
+    QList<Id> ids;
+    ids.reserve(m_list->count());
+    for (int i = 0; i < m_list->count(); ++i)
+        ids.append(m_list->item(i)->data(kIdRole).toLongLong());
+    m_store.setTaskOrder(ids);
 }
 
 Id TaskListPanel::selectedTaskId() const

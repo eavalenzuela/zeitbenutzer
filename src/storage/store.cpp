@@ -97,15 +97,19 @@ QString seriesDateKey(Id seriesId, const QDate& d)
 
 Id Store::createProject(const Project& p)
 {
+    // New projects append to the bottom of their sibling group (`IS ?` scopes to
+    // the same parent and matches NULL for top-level). The passed-in p.sort is
+    // ignored — order is managed via drag-reorder (setProjectPositions).
     QSqlQuery q(m_db.handle());
     q.prepare(QStringLiteral(
         "INSERT INTO project(parent_id, name, color, archived, sort) "
-        "VALUES(?,?,?,?,?)"));
+        "VALUES(?,?,?,?,"
+        "(SELECT COALESCE(MAX(sort)+1,0) FROM project WHERE parent_id IS ?))"));
     q.addBindValue(fromOptId(p.parentId));
     q.addBindValue(txt(p.name));
     q.addBindValue(txt(p.color));
     q.addBindValue(p.archived ? 1 : 0);
-    q.addBindValue(p.sort);
+    q.addBindValue(fromOptId(p.parentId));
     q.exec();
     return q.lastInsertId().toLongLong();
 }
@@ -168,6 +172,22 @@ void Store::setProjectColor(Id projectId, const QString& hex)
     q.exec();
 }
 
+void Store::setProjectPositions(const QList<ProjectPosition>& positions)
+{
+    QSqlDatabase db = m_db.handle();
+    db.transaction();
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral(
+        "UPDATE project SET parent_id = ?, sort = ? WHERE id = ?"));
+    for (const ProjectPosition& p : positions) {
+        q.addBindValue(fromOptId(p.parentId));
+        q.addBindValue(p.sort);
+        q.addBindValue(p.id);
+        q.exec();
+    }
+    db.commit();
+}
+
 void Store::deleteProject(Id projectId)
 {
     QSqlQuery q(m_db.handle());
@@ -180,10 +200,13 @@ void Store::deleteProject(Id projectId)
 
 Id Store::createNote(const Note& n)
 {
+    // New notes append to the bottom of the project's list; manual order is then
+    // managed via drag-reorder (setNoteOrder).
     QSqlQuery q(m_db.handle());
     q.prepare(QStringLiteral(
-        "INSERT INTO note(project_id, title, body_md, created_at, updated_at) "
-        "VALUES(?,?,?,?,?)"));
+        "INSERT INTO note(project_id, title, body_md, created_at, updated_at, sort) "
+        "VALUES(?,?,?,?,?,"
+        "(SELECT COALESCE(MAX(sort)+1,0) FROM note WHERE project_id = ?))"));
     q.addBindValue(n.projectId);
     q.addBindValue(txt(n.title));
     q.addBindValue(txt(n.bodyMd));
@@ -191,6 +214,7 @@ Id Store::createNote(const Note& n)
                                                  : QDateTime::currentDateTimeUtc()));
     q.addBindValue(toEpoch(n.updatedAt.isValid() ? n.updatedAt
                                                  : QDateTime::currentDateTimeUtc()));
+    q.addBindValue(n.projectId);
     q.exec();
     return q.lastInsertId().toLongLong();
 }
@@ -200,8 +224,8 @@ QList<Note> Store::notesForProject(Id projectId)
     QList<Note> out;
     QSqlQuery q(m_db.handle());
     q.prepare(QStringLiteral(
-        "SELECT id, project_id, title, body_md, created_at, updated_at "
-        "FROM note WHERE project_id = ? ORDER BY updated_at DESC"));
+        "SELECT id, project_id, title, body_md, created_at, updated_at, sort "
+        "FROM note WHERE project_id = ? ORDER BY sort, id"));
     q.addBindValue(projectId);
     q.exec();
     while (q.next()) {
@@ -212,9 +236,24 @@ QList<Note> Store::notesForProject(Id projectId)
         n.bodyMd    = q.value(3).toString();
         n.createdAt = fromEpoch(q.value(4));
         n.updatedAt = fromEpoch(q.value(5));
+        n.sort      = q.value(6).toInt();
         out.append(n);
     }
     return out;
+}
+
+void Store::setNoteOrder(const QList<Id>& orderedIds)
+{
+    QSqlDatabase db = m_db.handle();
+    db.transaction();
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("UPDATE note SET sort = ? WHERE id = ?"));
+    for (int i = 0; i < orderedIds.size(); ++i) {
+        q.addBindValue(i);
+        q.addBindValue(orderedIds.at(i));
+        q.exec();
+    }
+    db.commit();
 }
 
 Note Store::note(Id noteId)
@@ -366,10 +405,13 @@ QStringList Store::allNoteBodies()
 Id Store::createTask(const Task& t)
 {
     QSqlQuery q(m_db.handle());
+    // New tasks append to the bottom of the project's list; manual order is then
+    // managed via drag-reorder (setTaskOrder).
     q.prepare(QStringLiteral(
         "INSERT INTO task(project_id, series_id, occurrence_date, title, "
         "status, estimate_min, due, completed_at, sort) "
-        "VALUES(?,?,?,?,?,?,?,?,?)"));
+        "VALUES(?,?,?,?,?,?,?,?,"
+        "(SELECT COALESCE(MAX(sort)+1,0) FROM task WHERE project_id = ?))"));
     q.addBindValue(t.projectId);
     q.addBindValue(fromOptId(t.seriesId));
     q.addBindValue(dateText(t.occurrenceDate));
@@ -378,7 +420,7 @@ Id Store::createTask(const Task& t)
     q.addBindValue(t.estimateMin);
     q.addBindValue(toEpoch(t.due));
     q.addBindValue(toEpoch(t.completedAt));
-    q.addBindValue(t.sort);
+    q.addBindValue(t.projectId);
     q.exec();
     return q.lastInsertId().toLongLong();
 }
@@ -442,6 +484,20 @@ QList<Task> Store::tasksForProject(Id projectId)
         out.append(t);
     }
     return out;
+}
+
+void Store::setTaskOrder(const QList<Id>& orderedIds)
+{
+    QSqlDatabase db = m_db.handle();
+    db.transaction();
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("UPDATE task SET sort = ? WHERE id = ?"));
+    for (int i = 0; i < orderedIds.size(); ++i) {
+        q.addBindValue(i);
+        q.addBindValue(orderedIds.at(i));
+        q.exec();
+    }
+    db.commit();
 }
 
 // ---- series -----------------------------------------------------------------

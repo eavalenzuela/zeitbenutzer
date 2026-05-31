@@ -41,6 +41,7 @@ private slots:
 private:
     Id  selectedProjectId() const;
     void selectProjectById(Id id);
+    void persistTreeOrder();   // write the tree's structure/order back to the db
 
     Store&             m_store;
     QTreeView*         m_view;

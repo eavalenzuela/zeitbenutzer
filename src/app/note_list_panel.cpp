@@ -1,5 +1,6 @@
 #include "app/note_list_panel.h"
 
+#include "app/reorderable_list_widget.h"
 #include "storage/store.h"
 
 #include <QListWidget>
@@ -24,11 +25,22 @@ NoteListPanel::NoteListPanel(Store& store, QWidget* parent)
                    &NoteListPanel::onDeleteNote);
     layout->addWidget(bar);
 
-    m_list = new QListWidget(this);
+    auto* list = new ReorderableListWidget(this);
+    list->onReordered = [this] { persistOrder(); };
+    m_list = list;
     layout->addWidget(m_list);
 
     connect(m_list, &QListWidget::currentRowChanged, this,
             &NoteListPanel::onCurrentRowChanged);
+}
+
+void NoteListPanel::persistOrder()
+{
+    QList<Id> ids;
+    ids.reserve(m_list->count());
+    for (int i = 0; i < m_list->count(); ++i)
+        ids.append(m_list->item(i)->data(kIdRole).toLongLong());
+    m_store.setNoteOrder(ids);
 }
 
 void NoteListPanel::setProject(Id projectId)

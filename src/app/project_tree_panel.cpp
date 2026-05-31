@@ -4,6 +4,7 @@
 #include "storage/store.h"
 
 #include <QColorDialog>
+#include <QDropEvent>
 #include <QHash>
 #include <QIcon>
 #include <QInputDialog>
@@ -18,6 +19,8 @@
 #include <QToolBar>
 #include <QTreeView>
 #include <QVBoxLayout>
+
+#include <functional>
 
 namespace {
 QIcon colorSwatch(const QColor& c)
@@ -37,7 +40,86 @@ namespace zb {
 
 namespace {
 constexpr int kIdRole = Qt::UserRole + 1;
-}
+
+// QTreeView that reorders/reparents its items by drag, then reports the change.
+// The move is performed by hand (takeRow/insertRow) rather than via the model's
+// serialize-based InternalMove, which is unreliable for trees; this also lets us
+// reject drops that would push a node into its own subtree. No Q_OBJECT — a
+// std::function callback keeps it MOC-free.
+class ProjectTreeView : public QTreeView {
+public:
+    explicit ProjectTreeView(QWidget* parent = nullptr) : QTreeView(parent)
+    {
+        setDragDropMode(QAbstractItemView::InternalMove);
+        setDragEnabled(true);
+        setAcceptDrops(true);
+        setDropIndicatorShown(true);
+        setDefaultDropAction(Qt::MoveAction);
+        setSelectionMode(QAbstractItemView::SingleSelection);
+    }
+
+    std::function<void()> onReordered;
+
+protected:
+    void dropEvent(QDropEvent* event) override
+    {
+        auto* m = qobject_cast<QStandardItemModel*>(model());
+        const QModelIndex srcIndex = currentIndex();
+        if (!m || !srcIndex.isValid()) {
+            event->ignore();
+            return;
+        }
+
+        QStandardItem* srcItem   = m->itemFromIndex(srcIndex);
+        QStandardItem* srcParent = srcItem->parent() ? srcItem->parent()
+                                                     : m->invisibleRootItem();
+
+        // Resolve the destination parent + insert row from the drop indicator.
+        const QModelIndex targetIndex = indexAt(event->position().toPoint());
+        const DropIndicatorPosition dip = dropIndicatorPosition();
+        QStandardItem* destParent = m->invisibleRootItem();
+        int destRow = destParent->rowCount();
+        if (targetIndex.isValid() && dip != OnViewport) {
+            QStandardItem* targetItem = m->itemFromIndex(targetIndex);
+            if (dip == OnItem) {
+                destParent = targetItem;            // drop *into* the target
+                destRow = destParent->rowCount();
+            } else {                                // Above/Below → become sibling
+                destParent = targetItem->parent() ? targetItem->parent()
+                                                  : m->invisibleRootItem();
+                destRow = targetIndex.row() + (dip == BelowItem ? 1 : 0);
+            }
+        }
+
+        // Refuse to drop a node into itself or one of its descendants.
+        for (QStandardItem* a = destParent; a; a = a->parent())
+            if (a == srcItem) {
+                event->ignore();
+                return;
+            }
+
+        // Removing the source first shifts later same-parent rows up by one.
+        if (destParent == srcParent && srcIndex.row() < destRow)
+            --destRow;
+
+        QList<QStandardItem*> row = srcParent->takeRow(srcIndex.row());
+        destParent->insertRow(destRow, row);
+
+        const QModelIndex moved = row.first()->index();
+        setCurrentIndex(moved);
+        expand(moved);
+
+        // We performed the move ourselves above. Accept with IgnoreAction so the
+        // base InternalMove machinery does NOT then remove the "source" row
+        // (startDrag calls clearOrRemove() on a MoveAction) — that deletion is
+        // what made the dropped item vanish until the next relaunch.
+        event->setDropAction(Qt::IgnoreAction);
+        event->accept();
+        if (onReordered)
+            onReordered();
+    }
+};
+} // namespace
 
 ProjectTreePanel::ProjectTreePanel(Store& store, QWidget* parent)
     : QWidget(parent), m_store(store)
@@ -54,7 +136,9 @@ ProjectTreePanel::ProjectTreePanel(Store& store, QWidget* parent)
     layout->addWidget(bar);
 
     m_model = new QStandardItemModel(this);
-    m_view = new QTreeView(this);
+    auto* view = new ProjectTreeView(this);
+    view->onReordered = [this] { persistTreeOrder(); };
+    m_view = view;
     m_view->setModel(m_model);
     m_view->setHeaderHidden(true);
     m_view->setEditTriggers(QAbstractItemView::DoubleClicked
@@ -103,6 +187,31 @@ void ProjectTreePanel::reload()
 
     if (keep > 0)
         selectProjectById(keep);
+}
+
+void ProjectTreePanel::persistTreeOrder()
+{
+    // Walk the tree top-to-bottom and record each node's resulting parent and
+    // sibling position, then commit in one transaction.
+    QList<Store::ProjectPosition> positions;
+    std::function<void(QStandardItem*, std::optional<Id>)> walk =
+        [&](QStandardItem* parent, std::optional<Id> parentId) {
+            for (int r = 0; r < parent->rowCount(); ++r) {
+                QStandardItem* it = parent->child(r);
+                Store::ProjectPosition pos;
+                pos.id       = it->data(kIdRole).toLongLong();
+                pos.parentId = parentId;
+                pos.sort     = r;
+                positions.append(pos);
+                if (it->hasChildren())
+                    walk(it, pos.id);
+            }
+        };
+    walk(m_model->invisibleRootItem(), std::nullopt);
+
+    m_store.setProjectPositions(positions);
+    // Re-parenting changes descendant rollups + calendar attribution.
+    emit projectsChanged();
 }
 
 Id ProjectTreePanel::selectedProjectId() const
