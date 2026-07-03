@@ -307,4 +307,70 @@ QList<ICalEvent> expandICalEvents(const QList<ICalEvent>& events,
     return out;
 }
 
+namespace {
+
+// TEXT value escaping (RFC 5545 §3.3.11): the inverse of unescapeText.
+QString escapeText(const QString& s)
+{
+    QString out;
+    out.reserve(s.size());
+    for (const QChar c : s) {
+        if (c == QLatin1Char('\\'))
+            out += QLatin1String("\\\\");
+        else if (c == QLatin1Char(';'))
+            out += QLatin1String("\\;");
+        else if (c == QLatin1Char(','))
+            out += QLatin1String("\\,");
+        else if (c == QLatin1Char('\n'))
+            out += QLatin1String("\\n");
+        else if (c != QLatin1Char('\r'))
+            out += c;
+    }
+    return out;
+}
+
+QString utcStamp(const QDateTime& dt)
+{
+    return dt.toUTC().toString(QStringLiteral("yyyyMMdd'T'HHmmss'Z'"));
+}
+
+} // namespace
+
+QByteArray writeICalendar(const QList<ICalEvent>& events)
+{
+    // Concrete instances only — recurrence is expanded before export, so no
+    // RRULE/EXDATE lines are emitted. Lines end CRLF per the RFC.
+    const QString crlf = QStringLiteral("\r\n");
+    QString out;
+    out += QStringLiteral("BEGIN:VCALENDAR") + crlf;
+    out += QStringLiteral("VERSION:2.0") + crlf;
+    out += QStringLiteral("PRODID:-//zeitbenutzer//EN") + crlf;
+    out += QStringLiteral("CALSCALE:GREGORIAN") + crlf;
+
+    const QString dtstamp = utcStamp(QDateTime::currentDateTimeUtc());
+    for (const ICalEvent& e : events) {
+        if (!e.start.isValid() || !e.end.isValid())
+            continue;
+        out += QStringLiteral("BEGIN:VEVENT") + crlf;
+        out += QStringLiteral("UID:") + escapeText(e.uid) + crlf;
+        out += QStringLiteral("DTSTAMP:") + dtstamp + crlf;
+        if (e.allDay) {
+            out += QStringLiteral("DTSTART;VALUE=DATE:")
+                   + e.start.date().toString(QStringLiteral("yyyyMMdd")) + crlf;
+            out += QStringLiteral("DTEND;VALUE=DATE:")
+                   + e.end.date().toString(QStringLiteral("yyyyMMdd")) + crlf;
+        } else {
+            out += QStringLiteral("DTSTART:") + utcStamp(e.start) + crlf;
+            out += QStringLiteral("DTEND:") + utcStamp(e.end) + crlf;
+        }
+        out += QStringLiteral("SUMMARY:") + escapeText(e.summary) + crlf;
+        if (!e.location.isEmpty())
+            out += QStringLiteral("LOCATION:") + escapeText(e.location) + crlf;
+        out += QStringLiteral("END:VEVENT") + crlf;
+    }
+
+    out += QStringLiteral("END:VCALENDAR") + crlf;
+    return out.toUtf8();
+}
+
 } // namespace zb

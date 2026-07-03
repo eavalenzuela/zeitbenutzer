@@ -31,6 +31,10 @@ public:
     QList<Id>     projectAndDescendants(Id rootId);
     void          renameProject(Id projectId, const QString& name);
     void          setProjectColor(Id projectId, const QString& hex);
+    // Archive/unarchive a project. Cascades to descendants so an archived
+    // parent can't strand visible children (reload would float them to the
+    // top level). History is untouched — archived projects still roll up.
+    void          setProjectArchived(Id projectId, bool archived);
     // Commit a drag-reorder of the tree: rewrite parent_id + sort for the given
     // projects in one transaction.
     void          setProjectPositions(const QList<ProjectPosition>& positions);
@@ -49,6 +53,10 @@ public:
     // duplicate titles; -1 if none), and list titles for completion.
     Id          noteIdByTitle(const QString& title);
     QStringList noteTitles();
+    // Case-insensitive substring search over titles and bodies (LIKE with
+    // %/_/\ escaped), most-recently-updated first. Returned notes carry
+    // id/projectId/title/updatedAt only — bodies stay unfetched.
+    QList<Note> searchNotes(const QString& query, int limit = 50);
 
     // --- images (markdown embeds, content-addressed by sha256) ---------------
     // Insert an image, or return the id of an existing row with the same sha256

@@ -23,7 +23,9 @@
 #include "app/main_window.h"
 #include "app/markdown_image.h"
 #include "app/markdown_renderer.h"
+#include "app/note_search_dialog.h"
 #include "app/reconcile_panel.h"
+#include "app/schedule_task_dialog.h"
 #include "app/syntax_help.h"
 #include "app/note_list_panel.h"
 #include "app/project_tree_panel.h"
@@ -451,6 +453,59 @@ int main(int argc, char** argv)
         check("noteIdByTitle/noteTitles back link resolution + completion",
               store.noteIdByTitle(QStringLiteral("Linked Target")) > 0
                   && store.noteTitles().contains(QStringLiteral("Linked Target")));
+    }
+
+    // Reconcile panel: an actual end time-of-day before the start means the
+    // work ran past midnight — the span must roll into the next day, never
+    // come out negative.
+    {
+        const QDate day(2026, 6, 8);
+        ReconcilePanel rp;
+        rp.setInitial(QDateTime(day, QTime(22, 0)), QDateTime(day, QTime(23, 0)),
+                      BlockStatus::Done,
+                      QDateTime(day, QTime(23, 30)),
+                      QDateTime(day.addDays(1), QTime(0, 15)));
+        check("past-midnight actual span rolls the end to the next day",
+              rp.actualEnd() == QDateTime(day.addDays(1), QTime(0, 15))
+                  && rp.actualStart().secsTo(rp.actualEnd()) == 45 * 60);
+        // A same-day span stays on its day.
+        rp.setInitial(QDateTime(day, QTime(9, 0)), QDateTime(day, QTime(10, 0)),
+                      BlockStatus::Done, QDateTime(day, QTime(9, 15)),
+                      QDateTime(day, QTime(9, 45)));
+        check("same-day actual span keeps its date",
+              rp.actualEnd() == QDateTime(day, QTime(9, 45)));
+    }
+
+    // Schedule-a-task dialog: estimate prefills the duration and the span is
+    // start + duration.
+    {
+        ScheduleTaskDialog sched(QStringLiteral("write tests"), 45);
+        check("schedule dialog prefills duration from the estimate",
+              sched.durationMinutes() == 45
+                  && sched.start().secsTo(sched.end()) == 45 * 60);
+        ScheduleTaskDialog fallback(QStringLiteral("no estimate"), 0);
+        check("schedule dialog falls back to 60 min without an estimate",
+              fallback.durationMinutes() == 60);
+    }
+
+    // Note search dialog: live query lists matches; blank query lists nothing.
+    {
+        Note findable;
+        findable.projectId = pid;
+        findable.title = QStringLiteral("Quarterly planning");
+        findable.bodyMd = QStringLiteral("roadmap draft");
+        store.createNote(findable);
+
+        NoteSearchDialog search(store);
+        search.setQuery(QStringLiteral("quarterly"));
+        app.processEvents();
+        check("note search finds a title match", search.resultCount() == 1);
+        search.setQuery(QStringLiteral("roadmap"));
+        app.processEvents();
+        check("note search finds a body match", search.resultCount() == 1);
+        search.setQuery(QString());
+        app.processEvents();
+        check("empty query clears the results", search.resultCount() == 0);
     }
 
     // Syntax help panel constructs and shows headless.

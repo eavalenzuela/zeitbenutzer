@@ -1,6 +1,7 @@
 #include "app/task_list_panel.h"
 
 #include "app/reorderable_list_widget.h"
+#include "app/schedule_task_dialog.h"
 #include "storage/store.h"
 
 #include <QComboBox>
@@ -33,6 +34,8 @@ TaskListPanel::TaskListPanel(Store& store, QWidget* parent)
     bar->addAction(QStringLiteral("New task"), this, &TaskListPanel::onNewTask);
     bar->addAction(QStringLiteral("Delete task"), this,
                    &TaskListPanel::onDeleteTask);
+    bar->addAction(QStringLiteral("Schedule…"), this,
+                   &TaskListPanel::onScheduleTask);
     layout->addWidget(bar);
 
     auto* list = new ReorderableListWidget(this);
@@ -158,6 +161,39 @@ void TaskListPanel::onDeleteTask()
         return;
     m_store.deleteTask(id);
     reload();
+}
+
+void TaskListPanel::onScheduleTask()
+{
+    const Id id = selectedTaskId();
+    if (id <= 0)
+        return;
+    // Pull the full task (title may have unsaved item text; prefer the store).
+    Task task;
+    for (const Task& t : m_store.tasksForProject(m_projectId)) {
+        if (t.id == id) {
+            task = t;
+            break;
+        }
+    }
+    if (task.id <= 0)
+        return;
+
+    ScheduleTaskDialog dlg(task.title, task.estimateMin, this);
+    if (dlg.exec() != QDialog::Accepted)
+        return;
+
+    // The block carries the task's project (canonical time attribution) and
+    // links back to the task, closing the task-pool → calendar loop.
+    Block b;
+    b.title = task.title;
+    b.projectId = task.projectId;
+    b.plannedStart = dlg.start();
+    b.plannedEnd = dlg.end();
+    b.status = BlockStatus::Planned;
+    const Id blockId = m_store.createBlock(b);
+    m_store.linkBlockTask(blockId, task.id);
+    emit taskScheduled();
 }
 
 void TaskListPanel::onItemChanged(QListWidgetItem* item)

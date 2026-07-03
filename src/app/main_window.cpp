@@ -6,6 +6,7 @@
 #include "app/markdown_image.h"
 #include "app/note_editor.h"
 #include "app/note_list_panel.h"
+#include "app/note_search_dialog.h"
 #include "app/project_tree_panel.h"
 #include "app/settings.h"
 #include "app/settings_dialog.h"
@@ -15,7 +16,9 @@
 #include "app/time_rollup_panel.h"
 #include "storage/store.h"
 
+#include <QAction>
 #include <QApplication>
+#include <QKeySequence>
 #include <QMenu>
 #include <QMenuBar>
 #include <QMessageBox>
@@ -80,6 +83,20 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
         dlg.exec();
         m_calendar->reload(); // reflect adds/removes
     });
+    // Global note search: jump to any note by title/body match — the same
+    // select-project-then-note path a clicked wikilink takes.
+    QAction* find = appMenu->addAction(
+        QStringLiteral("Find in notes…"), this, [this] {
+            NoteSearchDialog dlg(m_store, this);
+            if (dlg.exec() != QDialog::Accepted || dlg.chosenNoteId() <= 0)
+                return;
+            const Note n = m_store.note(dlg.chosenNoteId());
+            if (n.id <= 0)
+                return;
+            m_tree->selectProject(n.projectId);
+            m_notes->selectNote(n.id);
+        });
+    find->setShortcut(QKeySequence(QStringLiteral("Ctrl+Shift+F")));
     appMenu->addAction(QStringLiteral("Reclaim image space"), this, [this] {
         m_editor->flush(); // persist any in-progress note so its refs count
         const int n = sweepOrphanImages(m_store);
@@ -114,6 +131,9 @@ MainWindow::MainWindow(Store& store, QWidget* parent)
             &CalendarView::reload);
     connect(m_tree, &ProjectTreePanel::projectsChanged, m_time,
             &TimeRollupPanel::recompute);
+    // A task scheduled into a block should appear on the calendar right away.
+    connect(m_tasks, &TaskListPanel::taskScheduled, m_calendar,
+            &CalendarView::reload);
     // editor renames flow back to the list label
     connect(m_editor, &NoteEditor::noteTitleChanged, m_notes,
             &NoteListPanel::updateNoteTitle);

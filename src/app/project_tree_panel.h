@@ -33,6 +33,7 @@ private slots:
     void onNewTopProject();
     void onNewChildProject();
     void onDeleteProject();
+    void onToggleArchived();
     void onSetColor();
     void onContextMenu(const QPoint& pos);
     void onItemChanged(QStandardItem* item);
@@ -48,6 +49,7 @@ private:
     QStandardItemModel* m_model;
     int                m_count = 0;
     bool               m_reloading = false;
+    bool               m_showArchived = false; // "Show archived" toggle
 };
 
 } // namespace zb

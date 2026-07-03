@@ -35,6 +35,8 @@ add_library(zb-app STATIC
     src/app/project_tree_panel.cpp
     src/app/note_list_panel.cpp
     src/app/task_list_panel.cpp
+    src/app/schedule_task_dialog.cpp
+    src/app/note_search_dialog.cpp
     src/app/time_rollup_panel.cpp
     src/app/calendar_view.cpp
     src/app/block_dialog.cpp

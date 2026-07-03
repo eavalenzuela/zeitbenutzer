@@ -56,8 +56,33 @@ stable auto-color derived from its id). Shown as a swatch in the tree and used
 to tint calendar blocks by project. Blocks with **no project** render hatched
 grey with a ⚠ marker so they stand out (they don't appear in rollups).
 
-Calendar niceties: a red **current-time line** on today's column, and a
-**"Repeat for N times"** option (RRULE `COUNT`) in the create dialog.
+Calendar niceties: a red **current-time line** on today's column (kept live by
+a once-a-minute repaint), hover **tooltips** on blocks and external events
+(title · project · plan/actual span · status), a **"Repeat for N times"**
+option (RRULE `COUNT`) in the create dialog, and keyboard navigation —
+**←/→** previous/next week, **T**/Home today (when the calendar has focus),
+**Esc** cancels an in-progress drag. The toolbar label shows the visible
+week's **plan vs done totals** at a glance. Reconciling a block whose actual
+end is before its start (worked past midnight) rolls the end into the next
+day rather than recording a negative span.
+
+**Tasks → calendar:** the task list's **Schedule…** action turns the selected
+task into a real block — pick a date, start time and duration (prefilled from
+the task's estimate); the block links back to the task via `block_task` and
+carries the task's project for time attribution.
+
+**Archiving:** right-click a project → **Archive** parks it (and its subtree)
+out of the tree without touching its history — rollups still count it. The
+tree's **Show archived** toggle lists archived projects greyed/italic;
+right-click → **Unarchive** restores them.
+
+**Find in notes** (App → Find in notes…, `Ctrl+Shift+F`): live search over
+note titles and bodies; activating a match jumps straight to the note, the
+same way clicking a `[[wikilink]]` does.
+
+**ICS export:** the calendar's **Export…** button saves the visible week's
+planned blocks (materialized and phantom alike) as a standard `.ics` file —
+the write counterpart of the module-6 reader, so your plan isn't locked in.
 
 ## Stack
 
@@ -89,8 +114,8 @@ ctest --test-dir build --output-on-failure   # runs storage_smoketest
 │   ├── types.h            # entity structs mirroring the schema
 │   ├── database.{h,cpp}   # connection + migrations
 │   ├── recurrence.{h,cpp} # RRULE subset: parse / serialize / expand
-│   ├── ical.{h,cpp}       # module 6: iCalendar (RFC 5545) reader + expander
-│   └── store.{h,cpp}      # CRUD, materialization, rollups, external events
+│   ├── ical.{h,cpp}       # module 6: iCalendar (RFC 5545) reader/writer + expander
+│   └── store.{h,cpp}      # CRUD, materialization, rollups, search, external events
 ├── src/app/               # module 1: GUI shell + panels
 │   ├── main.cpp           # opens DB at app-data dir, shows MainWindow
 │   ├── main_window.{h,cpp}        # three-pane shell, wiring

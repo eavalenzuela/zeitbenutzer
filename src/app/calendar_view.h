@@ -47,6 +47,7 @@ protected:
     void mouseReleaseEvent(QMouseEvent* e) override;
     void mouseDoubleClickEvent(QMouseEvent* e) override;
     void contextMenuEvent(QContextMenuEvent* e) override;
+    void keyPressEvent(QKeyEvent* e) override; // Esc cancels an active drag
 
 private:
     // --- layout math (all in viewport == scene coordinates) -----------------
@@ -84,11 +85,15 @@ private:
 
     QDateTime dayTime(const QDate& day, double minutes) const;
 
+    // Tooltip text for the hovered occurrence / external event ("" = none).
+    QString hoverText(const QPointF& pos) const;
+
     Store&            m_store;
     QDate             m_weekStart;      // Monday
     Id                m_activeProject = -1;
     QList<Occurrence> m_occ;
-    QHash<Id, QColor> m_projectColors;  // rebuilt on reload; drives block color
+    QHash<Id, QColor>  m_projectColors; // rebuilt on reload; drives block color
+    QHash<Id, QString> m_projectNames;  // rebuilt on reload; drives tooltips
 
     // External read-only overlay (module 6), rebuilt on reload.
     QList<ExternalEvent> m_external;
@@ -124,6 +129,8 @@ public slots:
     void goPrev();
     void goNext();
     void reviewToday();
+    // Save the visible week's planned blocks (incl. phantoms) as an .ics file.
+    void exportWeek();
 
 private:
     void updateLabel();

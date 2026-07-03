@@ -3,6 +3,7 @@
 #include "app/theme.h"
 #include "storage/store.h"
 
+#include <QAction>
 #include <QColorDialog>
 #include <QDropEvent>
 #include <QHash>
@@ -39,7 +40,8 @@ QIcon colorSwatch(const QColor& c)
 namespace zb {
 
 namespace {
-constexpr int kIdRole = Qt::UserRole + 1;
+constexpr int kIdRole       = Qt::UserRole + 1;
+constexpr int kArchivedRole = Qt::UserRole + 2;
 
 // QTreeView that reorders/reparents its items by drag, then reports the change.
 // The move is performed by hand (takeRow/insertRow) rather than via the model's
@@ -133,6 +135,12 @@ ProjectTreePanel::ProjectTreePanel(Store& store, QWidget* parent)
                    &ProjectTreePanel::onNewChildProject);
     bar->addAction(QStringLiteral("Delete"), this,
                    &ProjectTreePanel::onDeleteProject);
+    QAction* showArchived =
+        bar->addAction(QStringLiteral("Show archived"), this, [this](bool on) {
+            m_showArchived = on;
+            reload();
+        });
+    showArchived->setCheckable(true);
     layout->addWidget(bar);
 
     m_model = new QStandardItemModel(this);
@@ -163,7 +171,7 @@ void ProjectTreePanel::reload()
     m_reloading = true;
     m_model->clear();
 
-    const QList<Project> projects = m_store.listProjects(false);
+    const QList<Project> projects = m_store.listProjects(m_showArchived);
     m_count = projects.size();
 
     // Two passes so a child can attach to a parent regardless of list order.
@@ -171,8 +179,15 @@ void ProjectTreePanel::reload()
     for (const Project& p : projects) {
         auto* it = new QStandardItem(p.name);
         it->setData(static_cast<qlonglong>(p.id), kIdRole);
+        it->setData(p.archived, kArchivedRole);
         it->setIcon(colorSwatch(projectColor(p.color, p.id)));
         it->setEditable(true);
+        if (p.archived) { // greyed + italic so parked work reads as parked
+            QFont f = it->font();
+            f.setItalic(true);
+            it->setFont(f);
+            it->setForeground(currentTheme().subtleText);
+        }
         items.insert(p.id, it);
     }
     for (const Project& p : projects) {
@@ -299,6 +314,19 @@ void ProjectTreePanel::onDeleteProject()
     emit projectsChanged();
 }
 
+void ProjectTreePanel::onToggleArchived()
+{
+    const QModelIndex idx = m_view->currentIndex();
+    const Id id = selectedProjectId();
+    if (!idx.isValid() || id <= 0)
+        return;
+    const bool archived = idx.data(kArchivedRole).toBool();
+    m_store.setProjectArchived(id, !archived);
+    reload(); // an archived project usually vanishes from the visible tree
+    emit projectSelected(selectedProjectId());
+    emit projectsChanged();
+}
+
 void ProjectTreePanel::onSetColor()
 {
     const Id id = selectedProjectId();
@@ -330,6 +358,12 @@ void ProjectTreePanel::onContextMenu(const QPoint& pos)
     menu.addAction(QStringLiteral("New child"), this,
                    &ProjectTreePanel::onNewChildProject);
     menu.addSeparator();
+    // Archive parks a project (and its subtree) out of the tree without
+    // touching its history; the "Show archived" toggle brings it back.
+    menu.addAction(idx.data(kArchivedRole).toBool()
+                       ? QStringLiteral("Unarchive")
+                       : QStringLiteral("Archive"),
+                   this, &ProjectTreePanel::onToggleArchived);
     menu.addAction(QStringLiteral("Delete"), this,
                    &ProjectTreePanel::onDeleteProject);
     menu.exec(m_view->viewport()->mapToGlobal(pos));

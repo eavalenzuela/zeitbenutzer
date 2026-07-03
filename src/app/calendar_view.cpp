@@ -7,13 +7,17 @@
 #include "app/reconcile_panel.h"
 #include "app/settings.h"
 #include "app/theme.h"
+#include "storage/ical.h"
 #include "storage/recurrence.h"
 #include "storage/store.h"
 
 #include <QAction>
 #include <QContextMenuEvent>
+#include <QFile>
+#include <QFileDialog>
 #include <QGraphicsScene>
 #include <QHBoxLayout>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
 #include <QMessageBox>
@@ -21,6 +25,8 @@
 #include <QPainter>
 #include <QPushButton>
 #include <QResizeEvent>
+#include <QShortcut>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <algorithm>
 #include <cmath>
@@ -31,6 +37,29 @@ namespace {
 double clampd(double v, double lo, double hi)
 {
     return std::max(lo, std::min(hi, v));
+}
+
+// Compact duration for the week-totals label: "3h30", "45m", "0m".
+QString fmtDur(qint64 minutes)
+{
+    if (minutes <= 0)
+        return QStringLiteral("0m");
+    const qint64 h = minutes / 60, m = minutes % 60;
+    if (h && m)
+        return QStringLiteral("%1h%2").arg(h).arg(m, 2, 10, QLatin1Char('0'));
+    if (h)
+        return QStringLiteral("%1h").arg(h);
+    return QStringLiteral("%1m").arg(m);
+}
+
+QString statusLabel(BlockStatus s)
+{
+    switch (s) {
+    case BlockStatus::Done:    return QStringLiteral("done");
+    case BlockStatus::Skipped: return QStringLiteral("skipped");
+    case BlockStatus::Carried: return QStringLiteral("carried");
+    default:                   return QStringLiteral("planned");
+    }
 }
 } // namespace
 
@@ -47,7 +76,15 @@ CalGrid::CalGrid(Store& store, QWidget* parent)
     setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     setAlignment(Qt::AlignTop | Qt::AlignLeft);
     setMouseTracking(true);
+    setFocusPolicy(Qt::ClickFocus); // so Esc (drag cancel) + shortcuts land here
     m_weekStart = weekStartFor(QDate::currentDate());
+
+    // Keep the red now-line (and the today-column highlight across midnight)
+    // moving without waiting for an interaction to force a repaint.
+    auto* minuteTick = new QTimer(this);
+    connect(minuteTick, &QTimer::timeout, this,
+            [this] { viewport()->update(); });
+    minuteTick->start(60 * 1000);
 }
 
 void CalGrid::setWeekStart(const QDate& monday)
@@ -63,8 +100,11 @@ void CalGrid::reload()
     m_occ = m_store.occurrencesInRange(start, end);
 
     m_projectColors.clear();
-    for (const Project& p : m_store.listProjects(true))
+    m_projectNames.clear();
+    for (const Project& p : m_store.listProjects(true)) {
         m_projectColors.insert(p.id, projectColor(p.color, p.id));
+        m_projectNames.insert(p.id, p.name);
+    }
 
     // External read-only overlay: split into per-day all-day buckets (band) and
     // timed events (drawn behind blocks in the planned lane). The band height
@@ -201,6 +241,55 @@ int CalGrid::hitTestExternal(const QPointF& pos) const
             return i;
     }
     return -1;
+}
+
+QString CalGrid::hoverText(const QPointF& pos) const
+{
+    int edge = 0;
+    Lane lane = Lane::Planned;
+    const int idx = hitTest(pos, &edge, &lane);
+    if (idx >= 0) {
+        const Occurrence& o = m_occ.at(idx);
+        const QString span = QStringLiteral("%1–%2").arg(
+            o.plannedStart.toString(QStringLiteral("HH:mm")),
+            o.plannedEnd.toString(QStringLiteral("HH:mm")));
+        QStringList lines;
+        lines << (o.title.isEmpty() ? QStringLiteral("(block)") : o.title);
+        lines << (o.projectId
+                      ? m_projectNames.value(*o.projectId,
+                                             QStringLiteral("(unknown project)"))
+                      : QStringLiteral("(no project)"));
+        QString when = QStringLiteral("plan ") + span;
+        if (o.actualStart && o.actualEnd)
+            when += QStringLiteral("  ·  actual %1–%2").arg(
+                o.actualStart->toString(QStringLiteral("HH:mm")),
+                o.actualEnd->toString(QStringLiteral("HH:mm")));
+        lines << when;
+        QString state = statusLabel(o.status);
+        if (o.seriesId)
+            state += QStringLiteral("  ·  repeats ↻");
+        if (!o.materialized)
+            state += QStringLiteral("  ·  not yet materialized");
+        lines << state;
+        return lines.join(QLatin1Char('\n'));
+    }
+
+    const int ext = hitTestExternal(pos);
+    if (ext >= 0) {
+        const ExternalEvent& e = m_external.at(ext);
+        QStringList lines;
+        lines << (e.summary.isEmpty() ? QStringLiteral("(event)") : e.summary);
+        if (!e.location.isEmpty())
+            lines << e.location;
+        lines << (e.allDay
+                      ? QStringLiteral("all day")
+                      : QStringLiteral("%1–%2").arg(
+                            e.start.toString(QStringLiteral("HH:mm")),
+                            e.end.toString(QStringLiteral("HH:mm"))));
+        lines << QStringLiteral("external calendar (read-only)");
+        return lines.join(QLatin1Char('\n'));
+    }
+    return {};
 }
 
 // --- painting ---------------------------------------------------------------
@@ -512,6 +601,8 @@ void CalGrid::mouseMoveEvent(QMouseEvent* e)
             setCursor(edge == 0 ? Qt::SizeAllCursor : Qt::SizeVerCursor);
         else
             setCursor(Qt::ArrowCursor);
+        // Hover tooltip: what's under the pointer, at full detail.
+        setToolTip(hoverText(pos));
         QGraphicsView::mouseMoveEvent(e);
         return;
     }
@@ -678,6 +769,20 @@ void CalGrid::mouseDoubleClickEvent(QMouseEvent* e)
     emit weekChanged();
 }
 
+void CalGrid::keyPressEvent(QKeyEvent* e)
+{
+    // Esc during a drag: abandon it — nothing was committed yet (create
+    // commits on release; move/resize keeps the original span until then).
+    if (e->key() == Qt::Key_Escape && m_dragging) {
+        m_dragging = false;
+        m_mode = Mode::None;
+        m_activeIdx = -1;
+        viewport()->update();
+        return;
+    }
+    QGraphicsView::keyPressEvent(e);
+}
+
 void CalGrid::contextMenuEvent(QContextMenuEvent* e)
 {
     const QPointF pos = mapToScene(mapFromGlobal(e->globalPos()));
@@ -726,6 +831,12 @@ CalendarView::CalendarView(Store& store, QWidget* parent)
     auto* next = new QPushButton(QStringLiteral("▶"), this);
     for (QPushButton* b : {prev, today, next})
         b->setMaximumWidth(b == today ? 80 : 36);
+    prev->setToolTip(QStringLiteral("Previous week (Left)"));
+    today->setToolTip(QStringLiteral("Jump to the current week (T)"));
+    next->setToolTip(QStringLiteral("Next week (Right)"));
+    auto* exportBtn = new QPushButton(QStringLiteral("Export…"), this);
+    exportBtn->setToolTip(
+        QStringLiteral("Save this week's planned blocks as an .ics file"));
     auto* review = new QPushButton(QStringLiteral("Review today"), this);
     m_label = new QLabel(this);
     bar->addWidget(prev);
@@ -733,6 +844,7 @@ CalendarView::CalendarView(Store& store, QWidget* parent)
     bar->addWidget(next);
     bar->addSpacing(10);
     bar->addWidget(m_label, 1);
+    bar->addWidget(exportBtn);
     bar->addWidget(review);
     layout->addLayout(bar);
 
@@ -742,8 +854,21 @@ CalendarView::CalendarView(Store& store, QWidget* parent)
     connect(prev, &QPushButton::clicked, this, &CalendarView::goPrev);
     connect(today, &QPushButton::clicked, this, &CalendarView::goToday);
     connect(next, &QPushButton::clicked, this, &CalendarView::goNext);
+    connect(exportBtn, &QPushButton::clicked, this, &CalendarView::exportWeek);
     connect(review, &QPushButton::clicked, this, &CalendarView::reviewToday);
     connect(m_grid, &CalGrid::weekChanged, this, &CalendarView::updateLabel);
+
+    // Keyboard week navigation, scoped to the calendar so arrow keys keep
+    // working normally in text fields elsewhere in the window.
+    const auto shortcut = [this](const QKeySequence& seq, auto slot) {
+        auto* s = new QShortcut(seq, this);
+        s->setContext(Qt::WidgetWithChildrenShortcut);
+        connect(s, &QShortcut::activated, this, slot);
+    };
+    shortcut(QKeySequence(Qt::Key_Left), &CalendarView::goPrev);
+    shortcut(QKeySequence(Qt::Key_Right), &CalendarView::goNext);
+    shortcut(QKeySequence(Qt::Key_T), &CalendarView::goToday);
+    shortcut(QKeySequence(Qt::Key_Home), &CalendarView::goToday);
 
     reload();
 }
@@ -773,9 +898,23 @@ void CalendarView::updateLabel()
 {
     const QDate ws = m_grid->weekStart();
     const QDate we = ws.addDays(6);
-    m_label->setText(QStringLiteral("%1 – %2")
+
+    // Week totals: planned vs done for everything visible (skipped occurrences
+    // are already filtered out of occurrencesInRange) — the plan/reconcile
+    // payoff at a glance, without opening the Time tab.
+    const QDateTime winStart(ws, QTime(0, 0));
+    const QDateTime winEnd(we, QTime(23, 59, 59));
+    qint64 planMin = 0, doneMin = 0;
+    for (const Occurrence& o : m_store.occurrencesInRange(winStart, winEnd)) {
+        planMin += qMax<qint64>(0, o.plannedStart.secsTo(o.plannedEnd)) / 60;
+        if (o.actualStart && o.actualEnd)
+            doneMin += qMax<qint64>(0, o.actualStart->secsTo(*o.actualEnd)) / 60;
+    }
+
+    m_label->setText(QStringLiteral("%1 – %2   ·   plan %3 · done %4")
                          .arg(ws.toString(QStringLiteral("ddd d MMM")),
-                              we.toString(QStringLiteral("ddd d MMM yyyy"))));
+                              we.toString(QStringLiteral("ddd d MMM yyyy")),
+                              fmtDur(planMin), fmtDur(doneMin)));
 }
 
 void CalendarView::goToday()
@@ -792,6 +931,52 @@ void CalendarView::goNext()
 {
     m_grid->setWeekStart(m_grid->weekStart().addDays(7));
     updateLabel();
+}
+
+void CalendarView::exportWeek()
+{
+    const QDate ws = m_grid->weekStart();
+    const QDateTime winStart(ws, QTime(0, 0));
+    const QDateTime winEnd(ws.addDays(6), QTime(23, 59, 59));
+
+    // Everything planned this week — persisted blocks and phantom occurrences
+    // alike (both are the plan). Actuals stay local; the export is the schedule.
+    QList<ICalEvent> events;
+    for (const Occurrence& o : m_store.occurrencesInRange(winStart, winEnd)) {
+        ICalEvent e;
+        e.uid = o.materialized
+                    ? QStringLiteral("zb-block-%1@zeitbenutzer").arg(o.blockId)
+                    : QStringLiteral("zb-series-%1-%2@zeitbenutzer")
+                          .arg(o.seriesId ? *o.seriesId : 0)
+                          .arg(o.occurrenceDate.toString(QStringLiteral("yyyyMMdd")));
+        e.summary = o.title.isEmpty() ? QStringLiteral("(block)") : o.title;
+        e.start = o.plannedStart;
+        e.end = o.plannedEnd;
+        events.append(e);
+    }
+    if (events.isEmpty()) {
+        QMessageBox::information(this, QStringLiteral("Export week"),
+                                 QStringLiteral("Nothing planned this week."));
+        return;
+    }
+
+    const QString suggested = QStringLiteral("zeitbenutzer-week-%1.ics")
+                                  .arg(ws.toString(QStringLiteral("yyyy-MM-dd")));
+    const QString path = QFileDialog::getSaveFileName(
+        this, QStringLiteral("Export week as iCalendar"), suggested,
+        QStringLiteral("iCalendar (*.ics)"));
+    if (path.isEmpty())
+        return;
+
+    QFile f(path);
+    if (!f.open(QIODevice::WriteOnly | QIODevice::Truncate)) {
+        QMessageBox::warning(this, QStringLiteral("Export week"),
+                             QStringLiteral("Could not write %1:\n%2")
+                                 .arg(path, f.errorString()));
+        return;
+    }
+    f.write(writeICalendar(events));
+    f.close();
 }
 
 void CalendarView::reviewToday()

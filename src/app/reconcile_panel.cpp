@@ -110,7 +110,12 @@ QDateTime ReconcilePanel::actualStart() const
 
 QDateTime ReconcilePanel::actualEnd() const
 {
-    return QDateTime(m_date, m_actEnd->time());
+    // An end time-of-day before the start means the work ran past midnight
+    // (e.g. 23:00 → 00:30) — roll the end into the next day rather than
+    // producing a negative span that would poison the rollups.
+    const QDate day = m_actEnd->time() < m_actStart->time() ? m_date.addDays(1)
+                                                            : m_date;
+    return QDateTime(day, m_actEnd->time());
 }
 
 QDate ReconcilePanel::carryTarget() const { return m_carryTarget->date(); }

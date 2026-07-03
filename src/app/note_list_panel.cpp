@@ -4,6 +4,7 @@
 #include "storage/store.h"
 
 #include <QListWidget>
+#include <QMessageBox>
 #include <QToolBar>
 #include <QVBoxLayout>
 
@@ -113,6 +114,13 @@ void NoteListPanel::onDeleteNote()
 {
     const Id id = selectedNoteId();
     if (id <= 0)
+        return;
+    // Irreversible — confirm, naming the note (projects already confirm).
+    const QString title = m_list->currentItem()->text();
+    if (QMessageBox::question(
+            this, QStringLiteral("Delete note"),
+            QStringLiteral("Delete “%1”? This cannot be undone.").arg(title))
+        != QMessageBox::Yes)
         return;
     m_store.deleteNote(id);
     reload();

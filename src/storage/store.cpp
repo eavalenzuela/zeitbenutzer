@@ -188,6 +188,24 @@ void Store::setProjectPositions(const QList<ProjectPosition>& positions)
     db.commit();
 }
 
+void Store::setProjectArchived(Id projectId, bool archived)
+{
+    // Cascade to the whole subtree in one transaction: hiding a parent while
+    // its children stay visible would re-root them in the tree view, and
+    // unarchiving a parent should bring its subtree back with it.
+    const QList<Id> ids = projectAndDescendants(projectId);
+    QSqlDatabase db = m_db.handle();
+    db.transaction();
+    QSqlQuery q(db);
+    q.prepare(QStringLiteral("UPDATE project SET archived = ? WHERE id = ?"));
+    for (Id id : ids) {
+        q.addBindValue(archived ? 1 : 0);
+        q.addBindValue(id);
+        q.exec();
+    }
+    db.commit();
+}
+
 void Store::deleteProject(Id projectId)
 {
     QSqlQuery q(m_db.handle());
@@ -314,6 +332,41 @@ QStringList Store::noteTitles()
         "SELECT DISTINCT title FROM note WHERE title <> '' ORDER BY title"));
     while (q.next())
         out.append(q.value(0).toString());
+    return out;
+}
+
+QList<Note> Store::searchNotes(const QString& query, int limit)
+{
+    QList<Note> out;
+    const QString trimmed = query.trimmed();
+    if (trimmed.isEmpty())
+        return out;
+
+    // Escape LIKE metacharacters so the user's text matches literally.
+    QString escaped = trimmed;
+    escaped.replace(QLatin1Char('\\'), QLatin1String("\\\\"));
+    escaped.replace(QLatin1Char('%'), QLatin1String("\\%"));
+    escaped.replace(QLatin1Char('_'), QLatin1String("\\_"));
+    const QString pattern =
+        QLatin1Char('%') + escaped + QLatin1Char('%');
+
+    QSqlQuery q(m_db.handle());
+    q.prepare(QStringLiteral(
+        "SELECT id, project_id, title, updated_at FROM note "
+        "WHERE title LIKE ? ESCAPE '\\' OR body_md LIKE ? ESCAPE '\\' "
+        "ORDER BY updated_at DESC LIMIT ?"));
+    q.addBindValue(pattern);
+    q.addBindValue(pattern);
+    q.addBindValue(limit);
+    q.exec();
+    while (q.next()) {
+        Note n;
+        n.id        = q.value(0).toLongLong();
+        n.projectId = q.value(1).toLongLong();
+        n.title     = q.value(2).toString();
+        n.updatedAt = fromEpoch(q.value(3));
+        out.append(n);
+    }
     return out;
 }
 
@@ -632,15 +685,22 @@ void Store::deleteBlock(Id blockId)
 
 void Store::deleteBlockSeries(Id seriesId)
 {
-    QSqlQuery del(m_db.handle());
+    // One transaction: a series must never survive with its blocks gone
+    // (or vice versa) if the second statement fails.
+    QSqlDatabase db = m_db.handle();
+    db.transaction();
+
+    QSqlQuery del(db);
     del.prepare(QStringLiteral("DELETE FROM block WHERE series_id = ?"));
     del.addBindValue(seriesId);
     del.exec();
 
-    QSqlQuery ds(m_db.handle());
+    QSqlQuery ds(db);
     ds.prepare(QStringLiteral("DELETE FROM block_series WHERE id = ?"));
     ds.addBindValue(seriesId);
     ds.exec();
+
+    db.commit();
 }
 
 void Store::setBlockSkipped(Id blockId, bool skipped)
@@ -721,14 +781,22 @@ void Store::reconcileBlock(Id blockId, const QDateTime& actualStart,
 
 Id Store::carryOverBlock(Id blockId, const QDate& toDate)
 {
+    // Clone + link-copy + mark-original is all-or-nothing: a clone without
+    // its links (or an original marked Carried with no clone) is worse than
+    // no carry at all.
+    QSqlDatabase db = m_db.handle();
+    db.transaction();
+
     // Read the original.
     QSqlQuery q(m_db.handle());
     q.prepare(QString::fromLatin1("SELECT %1 FROM block WHERE id = ?")
                   .arg(QLatin1String(kBlockCols)));
     q.addBindValue(blockId);
     q.exec();
-    if (!q.next())
+    if (!q.next()) {
+        db.rollback();
         return -1;
+    }
     const Block orig = readBlock(q);
 
     // Clone onto the new day, same time-of-day, unreconciled.
@@ -767,6 +835,7 @@ Id Store::carryOverBlock(Id blockId, const QDate& toDate)
     mk.addBindValue(blockId);
     mk.exec();
 
+    db.commit();
     return newId;
 }
 
@@ -1034,8 +1103,9 @@ qint64 Store::plannedMinutes(Id projectId, bool includeDescendants,
     const QList<Id> ids =
         includeDescendants ? projectAndDescendants(projectId) : QList<Id>{projectId};
 
+    // MAX(…, 0) so a malformed row (end before start) can't subtract time.
     QString sql = QStringLiteral(
-                      "SELECT COALESCE(SUM(planned_end - planned_start), 0) "
+                      "SELECT COALESCE(SUM(MAX(planned_end - planned_start, 0)), 0) "
                       "FROM block WHERE ") + inClause(ids);
     if (winStart.isValid() && winEnd.isValid())
         sql += QStringLiteral(" AND planned_start BETWEEN ? AND ?");
@@ -1058,8 +1128,9 @@ qint64 Store::actualMinutes(Id projectId, bool includeDescendants,
     const QList<Id> ids =
         includeDescendants ? projectAndDescendants(projectId) : QList<Id>{projectId};
 
+    // MAX(…, 0) so a malformed row (end before start) can't subtract time.
     QString sql = QStringLiteral(
-                      "SELECT COALESCE(SUM(actual_end - actual_start), 0) "
+                      "SELECT COALESCE(SUM(MAX(actual_end - actual_start, 0)), 0) "
                       "FROM block WHERE actual_start IS NOT NULL "
                       "AND actual_end IS NOT NULL AND ") + inClause(ids);
     if (winStart.isValid() && winEnd.isValid())

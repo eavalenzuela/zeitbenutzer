@@ -150,6 +150,40 @@ int main(int argc, char** argv)
         const QDateTime farEnd(QDate(2027, 1, 1), QTime(0, 0));
         check("daily COUNT=3 yields exactly 3",
               daily && daily->expand(anchor, QDateTime(), winStart, farEnd).size() == 3);
+
+        // Fast-forward: a window far past the anchor must keep the pattern
+        // alignment. INTERVAL=2 weekly from a Monday decades back → exactly
+        // one hit in a two-week window, on a Monday, a whole number of
+        // 2-week periods from the anchor.
+        const auto biweekly =
+            RRule::parse(QStringLiteral("FREQ=WEEKLY;INTERVAL=2"));
+        const QDateTime oldAnchor(QDate(2000, 1, 3), QTime(9, 0)); // a Monday
+        const auto far = biweekly->expand(oldAnchor, QDateTime(),
+                                          winStart, winEnd);
+        check("biweekly far-window expansion yields one aligned Monday",
+              far.size() == 1 && far.first().date().dayOfWeek() == 1
+                  && QDate(2000, 1, 3).daysTo(far.first().date()) % 14 == 0);
+
+        // Same alignment invariant for an every-3-days rule…
+        const auto every3 =
+            RRule::parse(QStringLiteral("FREQ=DAILY;INTERVAL=3"));
+        const auto far3 = every3->expand(oldAnchor, QDateTime(),
+                                         winStart, winEnd);
+        check("every-3-days far-window expansion stays anchor-aligned",
+              !far3.isEmpty()
+                  && QDate(2000, 1, 3).daysTo(far3.first().date()) % 3 == 0
+                  && far3.first() >= winStart);
+
+        // …and for a bimonthly BYMONTHDAY rule.
+        const auto biMonthly = RRule::parse(
+            QStringLiteral("FREQ=MONTHLY;INTERVAL=2;BYMONTHDAY=15"));
+        const QDateTime mWin1(QDate(2026, 6, 1), QTime(0, 0));
+        const QDateTime mWin2(QDate(2026, 7, 31), QTime(23, 59));
+        const auto farM = biMonthly->expand(oldAnchor, QDateTime(), mWin1, mWin2);
+        check("bimonthly far-window expansion yields one aligned 15th",
+              farM.size() == 1 && farM.first().date().day() == 15
+                  && ((farM.first().date().year() - 2000) * 12
+                      + farM.first().date().month() - 1) % 2 == 0);
     }
 
     // --- recurring block series + lazy materialization -----------------------
@@ -416,6 +450,123 @@ int main(int argc, char** argv)
         s.replaceSourceEvents(srcId, evs);
         check("re-sync keeps the adopted event suppressed",
               s.externalEventsInRange(jun1, jul1).size() == 6);
+    }
+
+    // --- archiving (cascade + list filtering) ---------------------------------
+    {
+        Project parent, kid;
+        parent.name = QStringLiteral("parked");
+        const Id parentId = s.createProject(parent);
+        kid.name = QStringLiteral("parked-child");
+        kid.parentId = parentId;
+        const Id kidId = s.createProject(kid);
+
+        s.setProjectArchived(parentId, true);
+        check("archiving cascades to descendants and hides both",
+              s.listProjects(false).isEmpty());
+        const auto all = s.listProjects(true);
+        check("archived projects still list with includeArchived",
+              all.size() == 2
+                  && std::all_of(all.begin(), all.end(),
+                                 [](const Project& p) { return p.archived; }));
+
+        s.setProjectArchived(parentId, false);
+        check("unarchiving restores the whole subtree",
+              s.listProjects(false).size() == 2);
+        s.deleteProject(parentId);
+        check("archive scratch projects removed", s.listProjects(true).isEmpty());
+        (void)kidId;
+    }
+
+    // --- note search -----------------------------------------------------------
+    {
+        Project sp;
+        sp.name = QStringLiteral("search_project");
+        const Id spId = s.createProject(sp);
+        Note a, b;
+        a.projectId = b.projectId = spId;
+        a.title = QStringLiteral("Voronoi ideas");
+        a.bodyMd = QStringLiteral("relaxation passes");
+        b.title = QStringLiteral("shopping");
+        b.bodyMd = QStringLiteral("50% off lloyd brand tea");
+        s.createNote(a);
+        s.createNote(b);
+
+        check("searchNotes matches titles (case-insensitive)",
+              s.searchNotes(QStringLiteral("voronoi")).size() == 1);
+        check("searchNotes matches bodies",
+              s.searchNotes(QStringLiteral("lloyd")).size() == 1);
+        check("searchNotes treats LIKE metacharacters literally",
+              s.searchNotes(QStringLiteral("50%")).size() == 1
+                  && s.searchNotes(QStringLiteral("5%f")).isEmpty());
+        check("searchNotes with no hits returns empty",
+              s.searchNotes(QStringLiteral("no-such-text")).isEmpty());
+        check("blank query returns nothing",
+              s.searchNotes(QStringLiteral("   ")).isEmpty());
+        s.deleteProject(spId); // cascades to the notes
+    }
+
+    // --- rollup guard: a malformed span can't subtract time --------------------
+    {
+        Project rp;
+        rp.name = QStringLiteral("rollup_guard");
+        const Id rpId = s.createProject(rp);
+        Block good, bad;
+        good.projectId = bad.projectId = rpId;
+        good.title = QStringLiteral("good");
+        good.plannedStart = QDateTime(QDate(2026, 6, 8), QTime(9, 0));
+        good.plannedEnd   = QDateTime(QDate(2026, 6, 8), QTime(10, 0));
+        const Id goodId = s.createBlock(good);
+        s.reconcileBlock(goodId, good.plannedStart, good.plannedEnd);
+
+        bad.title = QStringLiteral("bad");
+        bad.plannedStart = QDateTime(QDate(2026, 6, 8), QTime(11, 0));
+        bad.plannedEnd   = QDateTime(QDate(2026, 6, 8), QTime(12, 0));
+        const Id badId = s.createBlock(bad);
+        // Simulate a corrupt row: actual end before actual start.
+        s.reconcileBlock(badId, QDateTime(QDate(2026, 6, 8), QTime(23, 0)),
+                         QDateTime(QDate(2026, 6, 8), QTime(22, 0)));
+
+        check("negative actual span is clamped out of the rollup",
+              s.actualMinutes(rpId, false) == 60);
+        s.deleteProject(rpId);
+    }
+
+    // --- ICS writer round-trip ---------------------------------------------------
+    {
+        ICalEvent timed;
+        timed.uid = QStringLiteral("zb-block-7@zeitbenutzer");
+        timed.summary = QStringLiteral("plan; review, then\nship");
+        timed.location = QStringLiteral("desk");
+        timed.start = QDateTime(QDate(2026, 6, 8), QTime(9, 0), QTimeZone::utc());
+        timed.end   = QDateTime(QDate(2026, 6, 8), QTime(10, 30), QTimeZone::utc());
+
+        ICalEvent allday;
+        allday.uid = QStringLiteral("zb-allday-1@zeitbenutzer");
+        allday.summary = QStringLiteral("Offsite");
+        allday.allDay = true;
+        allday.start = QDateTime(QDate(2026, 6, 9), QTime(0, 0));
+        allday.end   = QDateTime(QDate(2026, 6, 10), QTime(0, 0));
+
+        const QByteArray ics = writeICalendar({timed, allday});
+        QString werr;
+        const QList<ICalEvent> back = parseICalendar(ics, &werr);
+        check("written ICS parses back to two events",
+              back.size() == 2 && werr.isEmpty());
+        bool timedOk = false, alldayOk = false;
+        for (const ICalEvent& e : back) {
+            if (e.uid == timed.uid)
+                timedOk = (e.summary == timed.summary
+                           && e.location == timed.location
+                           && e.start == timed.start && e.end == timed.end
+                           && !e.allDay);
+            if (e.uid == allday.uid)
+                alldayOk = (e.allDay
+                            && e.start.date() == QDate(2026, 6, 9)
+                            && e.end.date() == QDate(2026, 6, 10));
+        }
+        check("timed event round-trips (escaped text, UTC span)", timedOk);
+        check("all-day event round-trips (VALUE=DATE, exclusive end)", alldayOk);
     }
 
     // --- images (markdown embeds) --------------------------------------------

@@ -111,6 +111,36 @@ QList<QDateTime> RRule::expand(const QDateTime& anchorStart,
 
     int produced = 0;
     QDate d = aDate;
+
+    // Fast-forward the walk to just before the window. Only when there is no
+    // COUNT cap: with one, every occurrence from the anchor must be produced
+    // (and counted) to know where the cap lands. The jump is always a whole
+    // number of pattern periods, so the modulo alignment below is preserved.
+    if (count <= 0 && winStart.isValid() && winStart.date() > d) {
+        const qint64 daysAhead = d.daysTo(winStart.date());
+        switch (freq) {
+        case Freq::Daily:
+            d = d.addDays((daysAhead / ivl) * ivl);
+            break;
+        case Freq::Weekly:
+            d = d.addDays((daysAhead / (7ll * ivl)) * (7ll * ivl));
+            break;
+        case Freq::Monthly: {
+            const QDate w = winStart.date();
+            const int months =
+                (w.year() - aDate.year()) * 12 + (w.month() - aDate.month());
+            const int jump = (qMax(0, months) / ivl) * ivl;
+            // Land on the 1st of an aligned month; the day-of-month match
+            // below finds the occurrence. Never move backwards past anchor.
+            const QDate cand =
+                QDate(aDate.year(), aDate.month(), 1).addMonths(jump);
+            if (cand > d)
+                d = cand;
+            break;
+        }
+        }
+    }
+
     // Safety bound on the day-by-day walk (~500 years) so an open-ended rule
     // with a far-future window can never loop forever.
     const int kMaxDays = 366 * 500;

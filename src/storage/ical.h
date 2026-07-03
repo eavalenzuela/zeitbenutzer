@@ -51,4 +51,10 @@ QList<ICalEvent> expandICalEvents(const QList<ICalEvent>& events,
                                   const QDateTime& winStart,
                                   const QDateTime& winEnd);
 
+// The writer counterpart: serialize concrete (already-expanded) events as an
+// RFC 5545 VCALENDAR. Timed events emit UTC DTSTART/DTEND; all-day events emit
+// VALUE=DATE (DTEND exclusive). TEXT fields are escaped. Round-trips through
+// parseICalendar. Used by the calendar's week export.
+QByteArray writeICalendar(const QList<ICalEvent>& events);
+
 } // namespace zb

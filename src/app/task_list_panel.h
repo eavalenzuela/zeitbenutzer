@@ -29,9 +29,15 @@ public slots:
     void setProject(zb::Id projectId);  // -1 clears
     void reload();
 
+signals:
+    // A block was created from a task ("Schedule…") — the calendar should
+    // reload to show it.
+    void taskScheduled();
+
 private slots:
     void onNewTask();
     void onDeleteTask();
+    void onScheduleTask();
     void onItemChanged(QListWidgetItem* item);
     void onCurrentChanged();
     void onStatusChanged(int index);
